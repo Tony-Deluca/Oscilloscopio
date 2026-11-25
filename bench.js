@@ -108,7 +108,7 @@ const scopeDefault = () => ({
   refSlot: "A",
   refs: { A: false, B: false },
   refY: { A: 0, B: 0 },
-  lang: "Italiano",
+  lang: "English",
   beep: "Off",
   printer: "HP",
   iface: "GPIB",
