@@ -426,13 +426,14 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Punti a schermo | 500 punti elaborati, 25 per divisione a schermo (250 col menu, 300 senza); misure e FFT sui 500 punti | manuale, pp. 13 e 21; manuale di programmazione, :ACQuire:POINt |
 | Esplorazione del record | da fermo, fino a sette scatti più veloci della Time/div che con 500 punti dà la stessa frequenza di campionamento; la barra della memoria mostra la parte visibile | manuale, p. 21 e figura 5-11 |
 | Peak Detect | minimo e massimo su ogni intervallo, da 500 ns/div | manuale, p. 41 |
+| Cursori | fissi sullo schermo, a passi di 1/25 di divisione; cambiando Volts/div o Time/div restano nello stesso punto e la lettura, riferita al centro del reticolo, segue la nuova scala | manuale, p. 59; comportamento osservato in laboratorio |
 | Misure automatiche | Vhi e Vlo come livello più frequente di ciascuna metà dell'istogramma, oppure massimo e minimo se manca un picco netto (rampe, triangoli); passaggi al 50 % con isteresi del 10 % | manuale, pp. 61–62 |
 | Average | media di 2–256 acquisizioni con 500 punti; con memorie più lunghe media sulle conversioni di ogni intervallo | manuale, p. 42 |
 | Tempo equivalente | asincrono: a ogni trigger i campioni a 100 MSa/s, con sfasamento casuale, riempiono le celle del record | dispense, «Campionamento in tempo equivalente asincrono» |
 | Roll | in Roll, e in Auto da 250 ms/div in su, la traccia scorre senza trigger | manuale, pp. 19 e 26 |
 | FFT | 500 punti, 0 dB = 1 Vrms, 20/10/5/2/1 dB/div (F5, oppure VOLTS/DIV con MATH selezionato), posizione con VARIABLE, cursori con sorgente MATH (f1, f2, Div, M1, M2) | manuale, pp. 22–24; resoconto, passo dodici |
 | Stadio d’ingresso | 1 MΩ ∥ 22 pF; banda del primo ordine a 150 MHz (2,3 ns) o 20 MHz; AC con polo a 10 Hz applicato alla forma d’onda | manuale, cap. 8 |
-| Cavi | RG-58 da circa 101 pF/m, lunghezza regolabile nel pannello del banco (1 m di partenza) | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
+| Cavi | RG-58 da circa 101 pF/m; di partenza 1 m, la lunghezza standard dei cavi BNC da banco; modificabile da 0 a 5 m nel pannello del banco («Cavi coassiali (m)») | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
 | Sonde ×10 | 10 MΩ ∥ 13 pF alla punta | dispense («10–15 pF») |
 | Generatore | frecce di unità in V (Vpp, Vrms, dBm) e in mV con Shift; AM con uscita pari a metà dell'ampiezza a 0 % e all'ampiezza impostata a 100 %; portante del burst fino a 5 MHz; messaggi ENTERED, EXITING, NOT ENTERED, FREQ LIMIT e AMPL LIMIT; cifra lampeggiante della manopola; stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia; vincoli \|Voffset\| + Vpp/2 ≤ Vmax e \|Voffset\| ≤ 2·Vpp con «MAX VALUE»/«MIN VALUE»; ampiezza massima ridotta per le arbitrarie (SINC 6,084 Vpp su 50 Ω) | User’s Guide, pp. 19–24, 59–62 e 123 |
 

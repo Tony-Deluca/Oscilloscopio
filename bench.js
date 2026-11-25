@@ -91,13 +91,16 @@ const scopeDefault = () => ({
   fftUnit: 20,
   fftPos: 0,
   fftCursorF: [1, 2],
-  fftCursorM: [0, -20],
+  fftCursorM: [0, -1],
   selected: "CH1",
   cursorSource: 0,
   cursorTMode: "Off",
   cursorVMode: "Track",
-  cursorT: [-0.8e-3, 2e-3],
-  cursorV: [0.496, 0.352],
+  // Cursori in divisioni dal centro del reticolo: restano fermi sullo schermo
+  // e la lettura segue la scala (T1 −800 µs, T2 2 ms, V1 496 mV, V2 352 mV
+  // nella foto, a 500 µs/div e 200 mV/div).
+  cursorT: [-1.6, 4],
+  cursorV: [2.48, 1.76],
   metrics: ["Vpp", "Freq", "Vrms", "Period", "—"],
   slot: 1,
   saveType: "Setup",
@@ -1658,14 +1661,8 @@ function scopeRows() {
             s[key] = next([prefix + "1", prefix + "2", "Track", "Off"], s[key]);
           },
           (d) => {
-            const step =
-              (onMath
-                ? time
-                  ? 1
-                  : s.fftUnit
-                : time
-                  ? visibleTime()
-                  : c.scale) / DISPLAY_POINTS_PER_DIV;
+            // Un punto del display per scatto: 1/25 di divisione.
+            const step = 1 / DISPLAY_POINTS_PER_DIV;
             for (const i of [0, 1])
               if (s[key] === prefix + (i + 1) || s[key] === "Track")
                 values[i] = Number((values[i] + d * step).toPrecision(12));
@@ -1683,7 +1680,7 @@ function scopeRows() {
       );
       if (onMath) {
         const [f1, f2] = s.fftCursorF.map((v) => v * hzPerDiv);
-        const [m1, m2] = s.fftCursorM;
+        const [m1, m2] = s.fftCursorM.map((v) => (v - s.fftPos) * s.fftUnit);
         return [
           sourceRow,
           modeRow(true),
@@ -1698,21 +1695,24 @@ function scopeRows() {
           ),
         ];
       }
-      const dt = s.cursorT[1] - s.cursorT[0],
-        dv = s.cursorV[1] - s.cursorV[0];
+      // Letture riferite al centro del reticolo (manuale, p. 59).
+      const [t1, t2] = s.cursorT.map((v) => v * visibleTime());
+      const [v1, v2] = s.cursorV.map((v) => v * c.scale);
+      const dt = t2 - t1,
+        dv = v2 - v1;
       return [
         sourceRow,
         modeRow(true),
         modeRow(false),
         info(
-          "T1 " + time2(s.cursorT[0]) + " · T2 " + time2(s.cursorT[1]),
+          "T1 " + time2(t1) + " · T2 " + time2(t2),
           "Δ " + time2(Math.abs(dt)) + " · " + si(1 / Math.abs(dt), "Hz"),
         ),
         info(
           "V1 " +
-            volts2(s.cursorV[0] * factor) +
+            volts2(v1 * factor) +
             " · V2 " +
-            volts2(s.cursorV[1] * factor),
+            volts2(v2 * factor),
           "Δ " + volts2(Math.abs(dv * factor)),
         ),
       ];
@@ -3223,8 +3223,11 @@ function updateMetrics() {
   metricCache = capture.values.map((all, j) => {
     let v = processedPoints(all);
     if (measureT) {
-      const a = clamp(Math.ceil((Math.min(...s.cursorT) + s.pos - start) / dt), 0, v.length);
-      const b = clamp(Math.ceil((Math.max(...s.cursorT) + s.pos - start) / dt), a, v.length);
+      const [from, to] = [Math.min(...s.cursorT), Math.max(...s.cursorT)].map(
+        (div) => div * visibleTime() + s.pos,
+      );
+      const a = clamp(Math.ceil((from - start) / dt), 0, v.length);
+      const b = clamp(Math.ceil((to - start) / dt), a, v.length);
       v = v.subarray(a, b);
     }
     const finite = v.filter(Number.isFinite);
@@ -3426,7 +3429,7 @@ function traceCanvas() {
   }
   const cursorOnMath = fft && s.cursorSource === 2;
   if (s.horizontal !== "XY" && s.menu === "Cursor" && (cursorOnMath || !fft)) {
-    const c = s.channels[Math.min(1, s.cursorSource)];
+    // I cursori sono fissi sullo schermo, in divisioni dal centro.
     ctx.lineWidth = 0.8;
     for (const [axis, values, active] of [
       ["T", cursorOnMath ? s.fftCursorF : s.cursorT, s.cursorTMode],
@@ -3438,10 +3441,8 @@ function traceCanvas() {
           axis === "T"
             ? cursorOnMath
               ? x + (gw * v) / cols
-              : tx(v + s.pos)
-            : cursorOnMath
-              ? fftY(v)
-              : vy(v, c.scale, c.pos);
+              : x + gw * (0.5 + v / cols)
+            : y + gh * (0.5 - v / 8);
         ctx.strokeStyle = cursorOnMath && axis === "V" ? "#f08b80" : i ? "#b6b2a7" : "#f6e3ac";
         ctx.fillStyle = ctx.strokeStyle;
         ctx.setLineDash(i ? [4, 3] : []);

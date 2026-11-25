@@ -61,8 +61,12 @@ check('FFT: 1 Vrms = 0 dB (Flattop)', Math.abs(m.db)<0.3, m);
 check('FFT: risoluzione fs/500', Math.abs(m.res-20)<1e-6 && Math.abs(m.hz-1000)<=m.res, m);
 // 7. Cursori a passi di 1/25 div
 await reset();
-m=await js("(()=>{s.menu='Cursor'; preferredRow=1; s.cursorTMode='T1'; const a=s.cursorT[0]; scopeVariable(1); const b=s.cursorT[0]; s.cursorVMode='V1'; preferredRow=2; const c=s.cursorV[0]; scopeVariable(1); return {dt:b-a, dv:s.cursorV[0]-c};})()");
+m=await js("(()=>{s.menu='Cursor'; preferredRow=1; s.cursorTMode='T1'; const a=s.cursorT[0]; scopeVariable(1); const b=s.cursorT[0]; s.cursorVMode='V1'; preferredRow=2; const c=s.cursorV[0]; scopeVariable(1); return {dt:(b-a)*visibleTime(), dv:(s.cursorV[0]-c)*s.channels[0].scale};})()");
 check('Cursori: 20 µs e 8 mV per scatto (500 µs/div, 200 mV/div)', Math.abs(m.dt-20e-6)<1e-12 && Math.abs(m.dv-0.008)<1e-12, m);
+// Cursori fissi sullo schermo: cambiando Volts/div e Time/div la lettura segue la scala
+await reset();
+m=await js("(()=>{s.menu='Cursor'; s.cursorVMode='Track'; s.cursorTMode='Track'; render(); const before=document.getElementById('screen-menu').innerText; const pos=[...s.cursorT, ...s.cursorV]; s.channels[0].scale=0.1; s.time=0.00025; changed(); const after=document.getElementById('screen-menu').innerText; return {same: JSON.stringify(pos)===JSON.stringify([...s.cursorT, ...s.cursorV]), before: /V1 496 mV/.test(before) && /T1 -800 µs/.test(before), after: /V1 248 mV/.test(after) && /T1 -400 µs/.test(after)};})()");
+check('Cursori fermi sullo schermo, lettura secondo la nuova scala', m.same && m.before && m.after, m);
 // 8. Autoset
 await reset();
 await js("lab.circuit='direct'; g.freq=1000; g.amp=1; changed(); autoset(); changed();"); await wait(300);
