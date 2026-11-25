@@ -4,7 +4,7 @@ Simulatore del generatore HP 33120A, dell’oscilloscopio GW Instek GDS-820C e d
 
 Apri [banco-rc.html](banco-rc.html) in un browser per usare la versione autonoma. Il file contiene gli stili e gli script. La versione con sorgenti separati si avvia da [index.html](index.html).
 
-- [Manuali e riferimenti](docs/riferimenti.md)
+- [Manuali e riferimenti](docs/riferimenti.md) e [schede degli strumenti dai manuali](docs/manuali.md)
 - [Schermata desktop](docs/evidenze/desktop.png) e [schermata mobile](docs/evidenze/mobile.png)
 - [Riquadro del display fotografato](docs/evidenze/photo-lcd.png) e [riquadro del circuito fotografato](docs/evidenze/photo-rc.png)
 - [Campioni CSV](docs/esportazioni/GDS-820C-campioni.csv) e [schermata PNG esportata](docs/esportazioni/GDS-820C-display.png)
