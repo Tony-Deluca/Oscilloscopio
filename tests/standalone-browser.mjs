@@ -107,7 +107,8 @@ await click('s-power','reset-lab');
 await delay(150);
 const capSetting = "(()=>{const cap=document.getElementById('capacitance');cap.value=164;cap.dispatchEvent(new Event('input'));})()";
 await js(capSetting);
-await delay(160);
+// In Average ×16 la traccia si assesta in qualche decimo di secondo.
+await delay(1500);
 assert.ok(await js('metricCache[1].Vpp < .47'));
 await click('reset-lab');
 const knob = await js("(()=>{const r=document.getElementById('time-div').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
@@ -153,7 +154,7 @@ await click('s-utility','f5','f3','f2','f1','f4','f5','f4');
 await delay(220);
 assert.ok(await js('s.goActive && goCount[1]>0 && goCount[0]===0'));
 await js(capSetting.replace('164','8200'));
-await delay(260);
+await delay(1200);
 assert.ok(await js('goCount[0]>0'));
 await click('reset-lab');
 console.log('Chrome: riproduzione Program, template e contatori Go/No Go verificati');

@@ -4645,7 +4645,10 @@ const isRoll = () =>
     s.time >= 0.25 &&
     s.horizontal !== "XY");
 // Tempo morto fra due acquisizioni: elaborazione e trasferimento al display.
-const deadTime = (length) => 0.04 + length * 0.4e-6;
+const deadTime = (length) => 0.01 + length * 0.4e-6;
+// Acquisizioni al secondo dello strumento in Average (stima, non dichiarata):
+// ogni acquisizione richiede il record intero più circa 5 ms di elaborazione.
+const averageRate = (duration) => 1 / (duration + 0.005);
 
 // Arma una nuova acquisizione: la memoria circolare deve prima riempire la
 // parte di pre-trigger, poi si attende l'evento e la parte di post-trigger.
@@ -4732,6 +4735,12 @@ function completeAcquisition(p) {
       ? values.map(() => [new Float64Array(length), new Float64Array(length)])
       : null;
     const hiRes = averaging && length > 500;
+    // In Average un aggiornamento del display vale più acquisizioni dello
+    // strumento: ognuna ha il suo rumore, quindi si mediano più conversioni.
+    const batch =
+      averaging && !hiRes && averageState?.key === averageKey()
+        ? clamp(Math.round((now() - averageState.last) * averageRate(p.duration)), 1, 16)
+        : 1;
     const adcPerSample = Math.max(1, dt * REALTIME_MAX);
     // Peak Detect e Average con memoria lunga usano più conversioni per
     // intervallo, entro un budget di calcolo per acquisizione.
@@ -4753,8 +4762,11 @@ function completeAcquisition(p) {
             sum / sub + (sigma * gaussian()) / Math.sqrt(adcPerSample);
           continue;
         }
-        const first = adc(channelVolts(pair, j) + sigma * gaussian(), c);
-        values[j][i] = first;
+        const volts = channelVolts(pair, j);
+        const first = adc(volts + sigma * gaussian(), c);
+        let mean = first;
+        for (let k = 1; k < batch; k++) mean += adc(volts + sigma * gaussian(), c);
+        values[j][i] = mean / batch;
         if (peak) {
           let lo = first,
             hi = first;
@@ -4769,7 +4781,7 @@ function completeAcquisition(p) {
       }
     }
   }
-  if (averaging && !plan.et && plan.length === 500) values = average(values, p);
+  if (averaging && !plan.et && plan.length === 500) values = average(values, p, now());
   const triggered = p.triggered;
   triggerStatus = triggered ? "Trig’d" : "AUTO";
   if (triggered) lastTrigger = p.trigger;
@@ -4792,13 +4804,35 @@ function completeAcquisition(p) {
   ratioTest();
 }
 // Media di N acquisizioni allineate al trigger (solo con memoria di 500 punti).
-function average(values, p) {
-  const key = p.revision + "|" + s.avg;
-  if (averageState?.key !== key)
-    averageState = { key, count: 0, values: values.map((v) => Float64Array.from(v)) };
+// È una media mobile: dopo le prime N acquisizioni ognuna pesa 1/N, quindi più
+// N è grande più la traccia impiega ad assestarsi. La media riparte solo se
+// cambiano le impostazioni dell'oscilloscopio, non se cambia il segnale.
+// Fra due aggiornamenti del display si contano le acquisizioni che lo
+// strumento avrebbe fatto, secondo averageRate.
+function averageKey() {
+  return JSON.stringify([
+    s.acq,
+    s.avg,
+    s.time,
+    s.pos,
+    s.recordLength,
+    s.horizontal,
+    s.channels.map((c) => [c.scale, c.pos, c.coupling, c.invert, c.bw]),
+    [s.trigType, s.trigSource, s.trigMode, s.slope, s.level, s.trigCoupling, s.reject],
+  ]);
+}
+function average(values, p, t) {
+  const key = averageKey();
+  if (averageState?.key !== key) {
+    averageState = { key, count: 1, last: t, values: values.map((v) => Float64Array.from(v)) };
+    return values;
+  }
   const state = averageState;
-  state.count++;
-  const weight = 1 / Math.min(state.count, s.avg);
+  const n = Math.max(1, (t - state.last) * averageRate(p.duration));
+  state.last = t;
+  state.count += n;
+  const weight =
+    state.count <= s.avg ? n / state.count : 1 - (1 - 1 / s.avg) ** n;
   for (let j = 0; j < 2; j++)
     for (let i = 0; i < values[j].length; i++)
       state.values[j][i] += (values[j][i] - state.values[j][i]) * weight;

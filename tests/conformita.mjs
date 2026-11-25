@@ -53,6 +53,12 @@ await js("g.amp=1; g.freq=1000; s.acq='Sample'; s.channels[0].scale=0.005; s.cha
 const sd=async()=>js("(()=>{const v=capture.values[0]; const mu=v.reduce((a,b)=>a+b,0)/v.length; return Math.sqrt(v.reduce((a,b)=>a+(b-mu)**2,0)/v.length);})()");
 const sample=await sd(); await js("s.acq='Average'; s.avg=16; changed();"); await fresh(1500); const avg=await sd();
 check('Average 16 riduce il rumore (GND, 5 mV/div)', avg < sample/2.5, {sample, avg});
+// Media mobile: più medie, assestamento più lento; il cambio di segnale non azzera la media
+const settle=async(n)=>{await reset(); await js("lab.circuit='direct'; s.channels[1].on=false; g.amp=1; s.acq='Average'; s.avg="+n+"; changed();"); await wait(n*20+600);
+ const v0=await js('metricCache[0].Vpp'); await js('g.amp=2; changed();'); const t0=Date.now();
+ while(Date.now()-t0<6000){ const v=await js('metricCache[0].Vpp'); if((v-v0)/(2-v0)>=0.63) return Date.now()-t0; await wait(40);} return Infinity;};
+const s16=await settle(16), s64=await settle(64);
+check('Average: assestamento più lento con più medie (16 < 64, ordine dei secondi)', s16<700 && s64>2*s16 && s64<3000, {s16,s64});
 // 6. FFT: 1 Vrms → 0 dB con Flattop
 await reset();
 await js("lab.circuit='direct'; g.freq=1000; g.amp=2*Math.SQRT2; s.channels[0].scale=1; s.channels[1].on=false; s.time=0.0025; s.acq='Sample'; s.math=true; s.operation='FFT'; s.fftWindow='Flattop'; changed();"); await fresh(500);
