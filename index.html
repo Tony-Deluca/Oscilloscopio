@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Banco RC · Laboratorio di misure</title>
+    <link rel="stylesheet" href="style.css" />
+    <script defer src="physics.js"></script>
+    <script defer src="bench.js"></script>
+  </head>
+  <body>
+    <main class="bench">
+      <header class="masthead">
+        <div>
+          <p class="kicker">Laboratorio di misure</p>
+          <h1>Banco <em>RC</em></h1>
+        </div>
+        <div class="mast-actions">
+          <button type="button" id="reset-lab">Ricarica assetto foto</button
+          ><a href="#guide">Guida al banco ↓</a>
+        </div>
+      </header>
+      <div class="workbench">
+        <div class="stack">
+          <section class="instrument generator" aria-labelledby="gen-title">
+            <header class="rail">
+              <span>Generatore di funzione</span>
+              <h2 id="gen-title">HP 33120A <small>15 MHz</small></h2>
+              <button id="g-power" class="power" title="Accensione generatore">
+                <i></i> Power
+              </button>
+            </header>
+            <div class="gen-body">
+              <div class="generator-screen" id="generator-screen">
+                <div class="g-status" id="g-status"></div>
+                <output class="g-reading" id="g-reading"></output>
+                <div class="g-bottom" id="g-bottom"></div>
+              </div>
+              <div class="gen-manual" id="gen-manual"></div>
+            </div>
+            <div class="gen-bottom">
+              <div class="gen-keys" id="gen-keys"></div>
+              <div class="g-jacks" id="g-jacks"></div>
+            </div>
+          </section>
+          <section class="instrument scope" aria-labelledby="scope-title">
+            <header class="rail">
+              <span>Oscilloscopio digitale</span>
+              <h2 id="scope-title">
+                GW Instek GDS-820C <small>150 MHz</small>
+              </h2>
+              <button id="s-power" class="power" title="Accensione o standby">
+                <i></i> On / Stby
+              </button>
+            </header>
+            <div class="scope-body">
+              <div class="scope-left">
+                <div class="scope-monitor">
+                  <div class="lcd" id="lcd">
+                    <div class="lcd-top">
+                      <span id="run-state">RUN</span
+                      ><span class="memory" aria-hidden="true"></span
+                      ><span id="trigger-state"></span>
+                    </div>
+                    <div class="lcd-body">
+                      <canvas
+                        id="trace"
+                        aria-label="Graticolo e forme d’onda di CH1 e CH2"
+                      ></canvas>
+                      <div id="screen-menu" class="screen-menu"></div>
+                      <pre
+                        class="help-pane"
+                        id="help-pane"
+                        hidden
+                        tabindex="0"
+                      ></pre>
+                    </div>
+                    <div class="lcd-status" id="lcd-status"></div>
+                  </div>
+                  <div id="scope-soft" class="scope-soft"></div>
+                </div>
+                <div class="under-screen">
+                  <button id="csv" type="button">Scarica campioni CSV</button
+                  ><span
+                    >Trascina le manopole o usa la rotella · frecce da
+                    tastiera</span
+                  >
+                </div>
+              </div>
+              <div class="scope-controls" id="scope-controls"></div>
+            </div>
+            <div class="scope-jacks" id="scope-jacks"></div>
+          </section>
+        </div>
+        <aside class="sidebar">
+          <section class="lab-card">
+            <header>
+              <h2>Circuito sul banco</h2>
+              <label for="circuit" class="sr-only"
+                >Configurazione circuito</label
+              ><select id="circuit">
+                <option value="rc">Passa-basso RC</option>
+                <option value="direct">Collegamento diretto</option>
+                <option value="open">Uscita scollegata</option>
+              </select>
+            </header>
+            <canvas
+              id="schematic"
+              width="560"
+              height="286"
+              role="img"
+              aria-label="Schema elettrico con resistenza in serie, condensatore verso massa e nodi IN e OUT"
+            ></canvas>
+            <div class="parameter-row" id="parameters">
+              <label
+                >Resistenza
+                <span
+                  ><input
+                    id="resistance"
+                    type="number"
+                    min="1"
+                    max="10000000"
+                    step="any"
+                    value="2200"
+                  />
+                  Ω</span
+                ></label
+              ><label
+                >Capacità
+                <span
+                  ><input
+                    id="capacitance"
+                    type="number"
+                    min="0.001"
+                    max="10000000"
+                    step="any"
+                    value="82"
+                  />
+                  nF</span
+                ></label
+              >
+            </div>
+            <p class="hint" id="lab-hint">
+              Valori di simulazione. La foto non basta per leggere R e C con
+              certezza.
+            </p>
+            <div class="patch" id="patch"></div>
+          </section>
+          <section class="lab-card">
+            <header><h2>Risposta del filtro</h2></header>
+            <dl class="results" id="response"></dl>
+            <p class="hint" id="response-hint">
+              Risposta sinusoidale OUT/IN alla frequenza impostata.
+            </p>
+          </section>
+        </aside>
+      </div>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <details class="guide" id="guide">
+        <summary>Guida e limiti della simulazione</summary>
+        <div>
+          <p>
+            <b>Inizia dall’assetto foto.</b> Il generatore imposta 1 Vpp. Sul
+            display dell’oscilloscopio si leggono 870 Hz, 200 mV/div sui due
+            canali, 500 µs/div, 50 kSa/s, CH1 in DC, CH2 in AC e acquisizione
+            Average. Il cablaggio CH1 su IN e CH2 su OUT è ricostruito dal
+            montaggio e dalle tracce. High Z, 2,2 kΩ e 82 nF sono scelte del
+            preset. La coppia R–C riproduce approssimativamente l’attenuazione e
+            lo sfasamento visibili.
+          </p>
+          <p>
+            <b>HP 33120A.</b> Freq, Ampl e Offset scelgono cosa regolare. Usa la
+            manopola o Enter Number, poi le cifre verdi e una freccia per
+            confermare l’unità. Shift attiva la funzione secondaria. Shift +
+            Enter apre il menu. ↑ e ↓ cambiano livello, ← e → scorrono, Enter
+            conferma. Shift + ← ritorna all’ultimo comando.
+          </p>
+          <p>
+            <b>GDS-820C.</b> Le funzioni di misura appaiono accanto a F1–F5.
+            VARIABLE regola la voce evidenziata. Run/Stop congela il record e
+            consente di esplorarlo. Collega il fondo scala sonda del canale
+            (Probe) all’attenuazione fisica selezionata nella sezione cablaggio.
+          </p>
+          <p>
+            <b>Modello.</b> L’uscita del generatore ha 50 Ω fisici. Per il
+            passa-basso, il carico nominale dei canali è 1 MΩ ∥ 22 pF in
+            collegamento diretto. La scheda del filtro mostra il trasferimento
+            ai nodi fisici prima dei controlli del display. Le misure a schermo
+            derivano dai campioni e dipendono da finestra, trigger e scala.
+          </p>
+          <p>
+            <b>Copertura.</b> La simulazione riproduce il flusso dei controlli
+            di banco. Campionamento equivalente, filtri analogici,
+            temporizzazione delle modulazioni, algoritmi firmware e sonde
+            ×10/×100 sono approssimati. Porte, stampante e calibrazione vengono
+            rappresentate come funzioni virtuali. La traduzione del display è
+            parziale. I template Go-No Go usano i riferimenti locali, con
+            confronto verticale. L’importazione FreeCapture e le porte fisiche
+            restano fuori dalla simulazione. Il firmware installato nei due
+            esemplari non è leggibile nelle foto.
+          </p>
+          <p>
+            <a
+              href="https://www.keysight.com/gn/en/assets/9018-06352/reference-guides/9018-06352.pdf"
+              >Keysight 33120A · Quick Reference Guide, p. 1</a
+            >
+            ·
+            <a
+              href="https://www.keysight.com/content/dam/keysight/en/doc/gate/user-manuals/9018-04436.pdf"
+              >Keysight 33120A · User’s Guide, pp. 3, 19–22, 30–33 e 53–114</a
+            >
+            ·
+            <a
+              href="https://www.gwinstek.com/en-US/products/downloadSeriesDownNew/12199/1057"
+              >GW Instek GDS-800 · Operation Manual, pp. 12–67 e 73–77</a
+            >
+          </p>
+        </div>
+      </details>
+    </main>
+  </body>
+</html>
