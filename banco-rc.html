@@ -5190,8 +5190,9 @@ function traceCanvas() {
     }
   }
   const cursorOnMath = fft && s.cursorSource === 2;
-  if (s.horizontal !== "XY" && s.menu === "Cursor" && (cursorOnMath || !fft)) {
-    // I cursori sono fissi sullo schermo, in divisioni dal centro.
+  // I cursori sono fissi sullo schermo, in divisioni dal centro, e restano
+  // visibili con qualsiasi menu: si tolgono solo con Off nel menu Cursor.
+  if (s.horizontal !== "XY" && (cursorOnMath || !fft)) {
     ctx.lineWidth = 0.8;
     for (const [axis, values, active] of [
       ["T", cursorOnMath ? s.fftCursorF : s.cursorT, s.cursorTMode],
