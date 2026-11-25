@@ -3392,22 +3392,6 @@ function traceCanvas() {
         (v) => vy(v, b.scale, b.pos),
         s.draw === "Dot",
       );
-    } else if (fft) {
-      const bins = fft.bins.subarray(0, Math.min(fft.bins.length, DISPLAY_POINTS_PER_DIV * cols + 1));
-      plot(
-        Float64Array.from(bins, (v) => 20 * Math.log10(Math.max(v, 1e-9))),
-        palette[2],
-        fftX,
-        (db) => clamp(fftY(db), y - 2, y + gh + 2),
-        s.draw === "Dot",
-      );
-      ctx.fillStyle = palette[2];
-      ctx.fillText("M", x + 2, clamp(fftY(0), y + 9, y + gh) - 2);
-      ctx.fillText(
-        "FFT CH" + (s.fftSource + 1) + " · " + si(fft.hzPerDiv, "Hz") + "/div · " + s.fftUnit + " dB/div · " + s.fftWindow,
-        x + 14,
-        y + 13,
-      );
     } else {
       const pointAt = (i) => tx(view.times[i]);
       if (s.persist) {
@@ -3463,12 +3447,31 @@ function traceCanvas() {
             (v) => vy(v, ref.scale, s.refY[key] * ref.scale),
           );
       }
+      // Con la FFT attiva restano visibili anche le tracce dei canali accesi:
+      // in laboratorio si spegneva CH1 per vedere meglio lo spettro.
+      if (fft) {
+        const bins = fft.bins.subarray(0, Math.min(fft.bins.length, DISPLAY_POINTS_PER_DIV * cols + 1));
+        plot(
+          Float64Array.from(bins, (v) => 20 * Math.log10(Math.max(v, 1e-9))),
+          palette[2],
+          fftX,
+          (db) => clamp(fftY(db), y - 2, y + gh + 2),
+          s.draw === "Dot",
+        );
+        ctx.fillStyle = palette[2];
+        ctx.fillText("M", x + 2, clamp(fftY(0), y + 9, y + gh) - 2);
+        ctx.fillText(
+          "FFT CH" + (s.fftSource + 1) + " · " + si(fft.hzPerDiv, "Hz") + "/div · " + s.fftUnit + " dB/div · " + s.fftWindow,
+          x + 14,
+          y + 13,
+        );
+      }
     }
   }
   const cursorOnMath = fft && s.cursorSource === 2;
   // I cursori sono fissi sullo schermo, in divisioni dal centro, e restano
   // visibili con qualsiasi menu: si tolgono solo con Off nel menu Cursor.
-  if (s.horizontal !== "XY" && (cursorOnMath || !fft)) {
+  if (s.horizontal !== "XY") {
     ctx.lineWidth = 0.8;
     for (const [axis, values, active] of [
       ["T", cursorOnMath ? s.fftCursorF : s.cursorT, s.cursorTMode],
