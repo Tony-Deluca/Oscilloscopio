@@ -38,7 +38,7 @@ await send('Page.enable');
 await resize(1410,950);
 await send('Page.navigate',{url:pathToFileURL(filename).href});
 await delay(400);
-assert.ok((await js('document.body.innerText')).includes('1.000 Vpp'));
+assert.ok((await js('document.body.innerText')).includes('1.000 VPP'));
 let measurement=await js('({ hz:capture.hz, dt:capture.dt, ch1:metricCache[0], ch2:metricCache[1] })');
 assert.ok(Math.abs(measurement.hz-870)<1, JSON.stringify(measurement));
 assert.equal(measurement.dt,1/50000);

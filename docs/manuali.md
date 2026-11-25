@@ -415,14 +415,31 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Massima frequenza del generatore 15 MHz (passo diciannove) | Confermata per sinusoide e quadra; triangolo e rampa arrivano solo a 100 kHz |
 | Terminazione High Z (passo tre) | All’accensione il 33120A torna sempre a **50 Ω** |
 
-## 4. Differenze trovate con il simulatore
+## 4. Come il simulatore applica questi dati
 
-Elenco di lavoro per migliorare la fedeltà di `bench.js` e `physics.js`.
+| Aspetto | Comportamento simulato | Fonte |
+| --- | --- | --- |
+| Frequenza di campionamento | valore 1-2,5-5 non superiore a L/(20 · Time/div), massimo 100 MSa/s; tempo equivalente sotto 250 ns/div con 500 punti; le lunghezze «NA» della tabella non si possono scegliere | tabella 5-2 |
+| ADC | 8 bit, 25 livelli per divisione, codici da −128 a +127 attorno al centro: oltre ±5,12 div il segnale satura | manuale d’uso (8 bit) e di programmazione (template da −100 a +100 su 8 div) |
+| Memoria e trigger | buffer circolare: prima si riempie il pre-trigger, poi si attende l’evento sul segnale analogico, poi il post-trigger; a 100 ms/div ogni traccia richiede 2 s | dispense, «Gestione della memoria circolare e trigger»; manuale, p. 41 |
+| Clock di campionamento | libero rispetto al trigger, con lo sfasamento corretto; in Sample i segnali sottocampionati vanno in aliasing | dispense, campionamento e Nyquist |
+| Punti a schermo | 500 punti elaborati, 25 per divisione a schermo (250 col menu, 300 senza); misure e FFT sui 500 punti | manuale, pp. 13 e 21; manuale di programmazione, :ACQuire:POINt |
+| Esplorazione del record | da fermo, fino a sette scatti di Time/div più veloci; la barra della memoria mostra la parte visibile | manuale, p. 21 |
+| Peak Detect | minimo e massimo su ogni intervallo, da 500 ns/div | manuale, p. 41 |
+| Average | media di 2–256 acquisizioni con 500 punti; con memorie più lunghe media sulle conversioni di ogni intervallo | manuale, p. 42 |
+| Tempo equivalente | asincrono: a ogni trigger i campioni a 100 MSa/s, con sfasamento casuale, riempiono le celle del record | dispense, «Campionamento in tempo equivalente asincrono» |
+| Roll | in Roll, e in Auto da 250 ms/div in su, la traccia scorre senza trigger | manuale, pp. 19 e 26 |
+| FFT | 500 punti, 0 dB = 1 Vrms, 20/10/5/2/1 dB/div (F5, oppure VOLTS/DIV con MATH selezionato), posizione con VARIABLE, cursori con sorgente MATH (f1, f2, Div, M1, M2) | manuale, pp. 22–24; resoconto, passo dodici |
+| Stadio d’ingresso | 1 MΩ ∥ 22 pF; banda del primo ordine a 150 MHz (2,3 ns) o 20 MHz; AC con polo a 10 Hz applicato alla forma d’onda | manuale, cap. 8 |
+| Cavi | RG-58 da circa 101 pF/m, lunghezza regolabile nel pannello del banco (1 m di partenza) | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
+| Sonde ×10 | 10 MΩ ∥ 13 pF alla punta | dispense («10–15 pF») |
+| Generatore | stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia | User’s Guide, pp. 19–24 e 123 |
 
-1. **FFT:** il simulatore usa i campioni visibili ridotti a una potenza di 2 (128 punti nell’assetto foto), invece dei 500 punti dello strumento. Manca anche **Unit/div** 20/10/5/2/1 dB su F5: il simulatore ha una scala fissa di 12,5 dB/div e uno Zoom ×1–×10 che il manuale non descrive. Manca infine la **Position** della linea 0 dB = 1 Vrms.
-2. **Cursori:** manca la sorgente **MATH**, con letture f1, f2, Δ e Div in frequenza e M1, M2 e Δ in dB.
-3. **Menu Acquire:** il simulatore mette Mem Leng su F4, lo strumento su F5.
-4. **Generatore, tasto DC:** il simulatore ha un tasto DC dedicato. Lo strumento entra in DC tenendo premuto Offset per più di 2 s.
-5. **Generatore, accensione:** il simulatore conserva la terminazione e i parametri di modulazione. Lo strumento torna a 50 Ω, 1 kHz e 100 mVpp con le modulazioni ai valori di p. 123 (AM 100%, FM a 10 Hz, FSK 100 Hz a 10 Hz, sweep 100 Hz–1 kHz). Il separatore delle migliaia di fabbrica è attivo, nel simulatore è spento.
-6. **Campionamento con memorie oltre 500 punti:** la formula del simulatore non segue sempre la tabella 5-2. Per esempio, a 1 ms/div con 2500 punti il simulatore dà 125 kSa/s, il manuale 100 kSa/s.
-7. **Cavo coassiale:** non è modellato, quindi la banda di 15–20 MHz e i tempi di salita misurati non si riproducono.
+**Scelte non documentate dal costruttore**, stimate e dichiarate come tali:
+- il rumore d’ingresso: 0,2 mV più 0,02 div efficaci;
+- il tempo morto fra due acquisizioni: 40 ms più 0,4 µs per punto;
+- il timeout del trigger automatico: 150 ms o la durata del record;
+- la sonda ×100 trattata come la ×10;
+- il fronte del generatore considerato ideale (la specifica dice solo «< 20 ns»).
+
+Con circa 2 m di cavo il simulatore dà un tempo di salita di 24 ns e circa −3 dB a 15 MHz, in linea con i 23,4 ns e con il taglio fra 15 e 20 MHz misurati in laboratorio.

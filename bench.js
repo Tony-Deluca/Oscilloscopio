@@ -88,7 +88,11 @@ const scopeDefault = () => ({
   mathPos: 0,
   fftSource: 0,
   fftWindow: "Hanning",
-  fftZoom: 1,
+  fftUnit: 20,
+  fftPos: 0,
+  fftCursorF: [1, 2],
+  fftCursorM: [0, -20],
+  selected: "CH1",
   cursorSource: 0,
   cursorTMode: "Off",
   cursorVMode: "Track",
@@ -134,7 +138,8 @@ const genDefault = () => ({
   term: "HIGH Z",
   duty: 50,
   modFreq: 100,
-  depth: 50,
+  fmFreq: 10,
+  depth: 100,
   deviation: 100,
   arb: "EXP RISE",
   arbs: {},
@@ -148,15 +153,15 @@ const genDefault = () => ({
     burstRate: 100,
     burstPhase: 0,
     burstSource: "INT",
-    fskFreq: 1700,
-    fskRate: 100,
+    fskFreq: 100,
+    fskRate: 10,
     fskSource: "INT",
     startFreq: 100,
-    stopFreq: 10000,
+    stopFreq: 1000,
     sweepTime: 1,
     sweepMode: "LINEAR",
     powerOn: "DEFAULT",
-    comma: "OFF",
+    comma: "ON",
     hpib: 10,
     iface: "HP-IB",
     baud: 9600,
@@ -164,6 +169,24 @@ const genDefault = () => ({
     calCount: 0,
   },
 });
+// Stato all'accensione del 33120A (User's Guide, p. 123). Le voci di sistema
+// e di interfaccia restano in memoria non volatile.
+function factoryGen(previous = genDefault()) {
+  const base = genDefault();
+  const kept = ["powerOn", "comma", "hpib", "iface", "baud", "parity", "calCount"];
+  return {
+    ...base,
+    on: true,
+    freq: 1000,
+    amp: 0.1,
+    term: "50 Ω",
+    arbs: previous.arbs,
+    settings: {
+      ...base.settings,
+      ...Object.fromEntries(kept.map((k) => [k, previous.settings[k]])),
+    },
+  };
+}
 const labDefault = () => ({
   circuit: "rc",
   r: 2200,
@@ -174,6 +197,7 @@ const labDefault = () => ({
   ],
   ext: "none",
   mod: "none",
+  cable: 1,
 });
 let g = genDefault(),
   s = scopeDefault(),
@@ -196,7 +220,6 @@ let preferredRow = 0,
   help = null,
   undo = null,
   capture,
-  needsCapture = true,
   clearScreen = false;
 let cachedRows,
   menuSignature = "",
@@ -244,10 +267,13 @@ function say(message) {
 }
 function changed(reacquire = true) {
   if (reacquire) {
-    needsCapture = true;
     clearScreen = false;
     lastTrigger = -Infinity;
     changeRevision++;
+    if (s.running) {
+      pending = null;
+      nextArm = 0;
+    }
   }
   render();
 }
@@ -485,7 +511,8 @@ function rangeG(field) {
     amp: [g.term === "HIGH Z" ? 0.1 : 0.05, 2 * (half - Math.abs(g.offset))],
     offset: [-half + g.amp / 2, half - g.amp / 2],
     duty: g.freq <= 5e6 ? [20, 80] : [40, 60],
-    modFreq: [0.01, g.mode === "FM" ? 10000 : 20000],
+    modFreq: [0.01, 20000],
+    fmFreq: [0.01, 10000],
     depth: [0, 120],
     deviation: [0.0001, Math.min(g.freq, 15e6 - g.freq) || 0.0001],
   }[field];
@@ -509,7 +536,7 @@ function editGen(field, value) {
   }
 }
 function genUnits() {
-  if (["freq", "modFreq", "deviation"].includes(genField))
+  if (["freq", "modFreq", "fmFreq", "deviation"].includes(genField))
     return [
       ["MHz", 1e6],
       ["kHz", 1e3],
@@ -687,6 +714,7 @@ function genRotate(d) {
       offset: 0.01,
       duty: 1,
       modFreq: 1,
+      fmFreq: 1,
       depth: 1,
       deviation: 1,
     }[genField];
@@ -728,21 +756,13 @@ function genKey(key, digitKey) {
       g.on = false;
     } else {
       const prior = stored("genLast", g);
-      const config = copy(g.settings),
-        term = g.term,
-        arbs = g.arbs;
+      const arbs = g.arbs;
       g =
-        config.powerOn === "LAST STATE"
+        g.settings.powerOn === "LAST STATE"
           ? { ...prior, on: true, arbs }
-          : {
-              ...genDefault(),
-              on: true,
-              settings: config,
-              term,
-              arbs,
-              freq: 1000,
-              amp: term === "50 Ω" ? 0.1 : 0.2,
-            };
+          : factoryGen(g);
+      genField = "freq";
+      genUnit = "Vpp";
     }
     menuLevel = -1;
     genEntry = null;
@@ -811,7 +831,7 @@ function genKey(key, digitKey) {
     } else chooseGenWave(key);
   }
   if (key === "Freq") {
-    genField = shift ? "modFreq" : "freq";
+    genField = shift ? (g.mode === "FM" ? "fmFreq" : "modFreq") : "freq";
     digit = 0;
   }
   if (key === "Ampl") {
@@ -843,7 +863,8 @@ const fieldLabels = {
   amp: "AMPLITUDE",
   offset: "DC OFFSET",
   duty: "% DUTY",
-  modFreq: "AM / FM FREQ",
+  modFreq: "AM FREQ",
+  fmFreq: "FM FREQ",
   depth: "AM DEPTH",
   deviation: "FM DEVIATION",
 };
@@ -917,31 +938,52 @@ function renderGenerator() {
           : item.name + " · ENTER";
     return;
   }
-  const v = g[genField];
+  reading.textContent = genDisplay(genField, g[genField]);
+}
+// Formati del display a fluorescenza del 33120A (User's Guide, pp. 19–24):
+// frequenza su 8 cifre con separatori «,» per le migliaia dopo il punto
+// decimale (menu COMMA), ampiezza e offset su 4 cifre.
+function genDisplay(field, v) {
   const group = g.settings.comma === "ON";
-  const volts = (x) =>
-    Math.abs(x) < 1 && x !== 0
-      ? (x * 1000).toFixed(2) + " mV"
-      : x.toFixed(3) + " V";
-  const hz = (x) =>
-    group
-      ? x.toLocaleString("en-US", { maximumFractionDigits: 6 }) + " Hz"
-      : si(x, "Hz", 8);
-  const formatted = {
-    freq: () => hz(v),
-    amp: () =>
-      genUnit === "dBm"
-        ? (10 * Math.log10((v * waveRms()) ** 2 / (50 * 0.001))).toFixed(2) +
-          " dBm"
-        : volts(/rms/i.test(genUnit) ? v * waveRms() : v) +
-          (/rms/i.test(genUnit) ? "rms" : "pp"),
-    offset: () => volts(v),
-    duty: () => v + " %",
-    modFreq: () => hz(v),
-    depth: () => v + " %",
-    deviation: () => hz(v),
-  }[genField]();
-  reading.textContent = formatted;
+  const digits = (x, n) => {
+    const whole = Math.max(1, Math.floor(Math.log10(Math.abs(x) || 1)) + 1);
+    const text = Math.abs(x).toFixed(Math.max(0, n - whole));
+    if (!group || !text.includes(".")) return text;
+    const [a, b] = text.split(".");
+    return a + "." + b.replace(/(\d{3})(?=\d)/g, "$1,");
+  };
+  const hz = (x) => {
+    const [factor, unit] =
+      x >= 1e6 ? [1e6, "MHz"] : x >= 1e3 ? [1e3, "KHz"] : x >= 1 ? [1, "Hz"] : [1e-3, "mHz"];
+    return digits(x / factor, 8) + " " + unit;
+  };
+  const level = (x, suffix) =>
+    Math.abs(x) >= 1
+      ? digits(x, 4) + " V" + suffix
+      : digits(x * 1000, 4) + " mV" + suffix;
+  switch (field) {
+    case "freq":
+    case "modFreq":
+    case "fmFreq":
+    case "deviation":
+      return hz(v);
+    case "amp": {
+      if (genUnit === "dBm") {
+        const dbm = 10 * Math.log10((v * waveRms()) ** 2 / (50 * 0.001));
+        return (dbm >= 0 ? "+" : "-") + Math.abs(dbm).toFixed(2) + " dBm";
+      }
+      const rms = /rms/i.test(genUnit);
+      return level(rms ? v * waveRms() : v, rms ? "RMS" : "PP");
+    }
+    case "offset": {
+      const sign = v < 0 ? "-" : "+";
+      if (v === 0 || Math.abs(v) >= 1) return sign + Math.abs(v).toFixed(3) + " VDC";
+      const mv = Math.abs(v) * 1000;
+      return sign + mv.toFixed(mv >= 100 ? 1 : 2).padStart(5, "0") + " mVDC";
+    }
+    default:
+      return v + " %" + (field === "duty" ? " DUTY" : field === "depth" ? " DEPTH" : "");
+  }
 }
 function setCalibrationLock() {
   if (calibrated) {
@@ -1101,22 +1143,43 @@ function setupGenerator() {
         title: alt ? key + " · Shift " + alt : key,
       }),
     );
-  $("gen-keys").append(
-    button(
-      "DC",
-      () => {
-        if (g.on) {
-          chooseGenWave("DC");
-          changed();
+  // Uscita DC: si tiene premuto Offset o un tasto di funzione della prima
+  // fila per più di 2 s (User's Guide, p. 24). Non esiste un tasto DC.
+  for (const id of ["g-sine", "g-square", "g-triangle", "g-ramp", "g-noise", "g-arb", "g-offset"]) {
+    const key = $(id);
+    let timer = null;
+    const cancel = () => {
+      clearTimeout(timer);
+      timer = null;
+    };
+    key.title += " · tieni premuto 2 s per l’uscita DC";
+    key.addEventListener("pointerdown", () => {
+      cancel();
+      timer = setTimeout(() => {
+        timer = null;
+        key.dataset.held = "1";
+        if (!g.on) return;
+        genShift = false;
+        genEntry = null;
+        genAction = null;
+        menuLevel = -1;
+        chooseGenWave("DC");
+        changed();
+      }, 2000);
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"])
+      key.addEventListener(type, cancel);
+    key.addEventListener(
+      "click",
+      (e) => {
+        if (key.dataset.held) {
+          delete key.dataset.held;
+          e.stopImmediatePropagation();
         }
       },
-      {
-        className: "span2",
-        title:
-          "DC · modalità del generatore disponibile via SCPI nel modello fisico",
-      },
-    ),
-  );
+      true,
+    );
+  }
   const arrows = document.createElement("div");
   arrows.className = "arrowpad";
   for (const [key, label, title] of [
@@ -1209,6 +1272,7 @@ function toggleChannel(i) {
     if (s.menu === name || !s.channels[i].on)
       s.channels[i].on = !s.channels[i].on;
     s.menu = name;
+    s.selected = name;
   });
 }
 function setHorizontal(mode) {
@@ -1347,10 +1411,19 @@ function scopeRows() {
           ),
         )
         .concat([
-          select("Mem Leng", "recordLength", lengths, (n) =>
-            n.toLocaleString("it-IT"),
+          null,
+          row(
+            "Mem Leng",
+            effectiveLength().toLocaleString("it-IT"),
+            () => {
+              const available = lengths.filter((n) => lengthAvailable(n, s.time));
+              s.recordLength = next(available, effectiveLength());
+            },
+            (d) => {
+              const available = lengths.filter((n) => lengthAvailable(n, s.time));
+              s.recordLength = next(available, effectiveLength(), d);
+            },
           ),
-          info("Sample rate", si(capture ? 1 / capture.dt : NaN, "Sa/s")),
         ]);
     case "Display":
       return [
@@ -1491,15 +1564,24 @@ function scopeRows() {
         back("Trigger"),
       ];
     case "Cursor": {
-      const c = s.channels[s.cursorSource],
-        factor = c.probe;
       const [, sourceLabel, horizontalLabel, verticalLabel] =
         cursorLabels[s.lang] ?? cursorLabels.English;
-      const dt = s.cursorT[1] - s.cursorT[0],
-        dv = s.cursorV[1] - s.cursorV[0];
+      if (s.cursorSource === 2 && !fftActive()) s.cursorSource = 0;
+      const onMath = s.cursorSource === 2;
+      const c = s.channels[Math.min(1, s.cursorSource)],
+        factor = c.probe;
+      const fft = onMath ? fftData() : null;
+      const hzPerDiv = fft?.hzPerDiv ?? NaN;
+      // Cursori a passi di un punto del display: 1/25 di divisione.
       const modeRow = (time) => {
         const key = time ? "cursorTMode" : "cursorVMode",
-          values = time ? s.cursorT : s.cursorV,
+          values = onMath
+            ? time
+              ? s.fftCursorF
+              : s.fftCursorM
+            : time
+              ? s.cursorT
+              : s.cursorV,
           prefix = time ? "T" : "V";
         return row(
           time ? horizontalLabel : verticalLabel,
@@ -1508,23 +1590,50 @@ function scopeRows() {
             s[key] = next([prefix + "1", prefix + "2", "Track", "Off"], s[key]);
           },
           (d) => {
-            const step = (time ? visibleTime() : c.scale) / 25;
-            if (s[key] === prefix + "1" || s[key] === "Track")
-              values[0] += d * step;
-            if (s[key] === prefix + "2" || s[key] === "Track")
-              values[1] += d * step;
+            const step =
+              (onMath
+                ? time
+                  ? 1
+                  : s.fftUnit
+                : time
+                  ? visibleTime()
+                  : c.scale) / DISPLAY_POINTS_PER_DIV;
+            for (const i of [0, 1])
+              if (s[key] === prefix + (i + 1) || s[key] === "Track")
+                values[i] = Number((values[i] + d * step).toPrecision(12));
           },
           false,
         );
       };
+      const sources = fftActive() ? [0, 1, 2] : [0, 1];
+      const sourceRow = select(
+        sourceLabel,
+        "cursorSource",
+        sources,
+        (i) => (i === 2 ? "MATH" : "CH" + (i + 1)),
+        false,
+      );
+      if (onMath) {
+        const [f1, f2] = s.fftCursorF.map((v) => v * hzPerDiv);
+        const [m1, m2] = s.fftCursorM;
+        return [
+          sourceRow,
+          modeRow(true),
+          modeRow(false),
+          info(
+            "f1 " + si(f1, "Hz") + " · f2 " + si(f2, "Hz"),
+            "Δ " + si(Math.abs(f2 - f1), "Hz") + " · Div " + si(hzPerDiv, "Hz"),
+          ),
+          info(
+            "M1 " + m1.toFixed(2) + " dB · M2 " + m2.toFixed(2) + " dB",
+            "Δ " + Math.abs(m2 - m1).toFixed(2) + " dB",
+          ),
+        ];
+      }
+      const dt = s.cursorT[1] - s.cursorT[0],
+        dv = s.cursorV[1] - s.cursorV[0];
       return [
-        select(
-          sourceLabel,
-          "cursorSource",
-          [0, 1],
-          (i) => "CH" + (i + 1),
-          false,
-        ),
+        sourceRow,
         modeRow(true),
         modeRow(false),
         info(
@@ -1555,37 +1664,42 @@ function scopeRows() {
         ),
       );
     case "Math":
+      if (s.operation === "FFT")
+        return [
+          select("Operation", "operation", ["CH1+CH2", "CH1−CH2", "FFT"], String, false),
+          select("Source", "fftSource", [0, 1], (i) => "CH" + (i + 1), false),
+          select(
+            "Window",
+            "fftWindow",
+            ["Rectangular", "Blackman", "Hanning", "Flattop"],
+            String,
+            false,
+          ),
+          number(
+            "Position",
+            "fftPos",
+            -4,
+            4,
+            0.04,
+            (n) => (n * s.fftUnit).toFixed(1) + " dB",
+            false,
+          ),
+          select("Unit/div", "fftUnit", [20, 10, 5, 2, 1], (n) => n + " dB", false),
+        ];
       return [
-        select(
-          "Operation",
-          "operation",
-          ["CH1+CH2", "CH1−CH2", "FFT"],
-          String,
+        select("Operation", "operation", ["CH1+CH2", "CH1−CH2", "FFT"], String, false),
+        number(
+          "Position",
+          "mathPos",
+          -8,
+          8,
+          0.04,
+          (n) => n.toFixed(2) + " div",
           false,
         ),
-        s.operation === "FFT"
-          ? select("Source", "fftSource", [0, 1], (i) => "CH" + (i + 1), false)
-          : number(
-              "Position",
-              "mathPos",
-              -8,
-              8,
-              0.1,
-              (n) => n.toFixed(1) + " div",
-              false,
-            ),
-        s.operation === "FFT"
-          ? select(
-              "Window",
-              "fftWindow",
-              ["Rectangular", "Blackman", "Hanning", "Flattop"],
-              String,
-              false,
-            )
-          : info("Scale", si(mathScale(), "V") + "/div"),
-        s.operation === "FFT"
-          ? select("Zoom", "fftZoom", [1, 2, 5, 10], (v) => "×" + v, false)
-          : null,
+        info("Scale", si(mathScale(), "V") + "/div"),
+        null,
+        null,
       ];
     case "Save/Recall":
       return s.saveType === "Setup"
@@ -2124,7 +2238,11 @@ function horizontalScale(d) {
         : timeSteps;
   if (s.horizontal === "Window" || s.horizontal === "Window Zoom")
     s.zoom = scaleStep(choices, s.zoom, -d);
-  else s.time = scaleStep(choices, s.time, -d);
+  else if (!s.running && capture && !capture.roll) {
+    const i = timeSteps.indexOf(scaleStep(timeSteps, capture.time, 0));
+    const fastest = timeSteps[Math.max(0, i - 7)];
+    s.time = scaleStep(choices.filter((t) => t >= fastest), s.time, -d);
+  } else s.time = scaleStep(choices, s.time, -d);
 }
 function channelOffset(channel, delta) {
   const limit = channel.scale <= 0.05 ? 0.5 : channel.scale <= 0.5 ? 5 : 50;
@@ -2140,7 +2258,12 @@ function runScope() {
     return;
   }
   s.running = !s.running;
-  if (s.running) lastTrigger = -Infinity;
+  if (s.running) {
+    lastTrigger = -Infinity;
+    pending = null;
+    nextArm = 0;
+    averageState = null;
+  }
 }
 function softKey(i) {
   if (!s.on || help !== null || !s.menuOn) return;
@@ -2166,7 +2289,11 @@ function scopeVariable(d) {
     $("help-pane").scrollTop += d * 20;
     return;
   }
-  const r = scopeRows()[preferredRow];
+  // Nel menu Math la manopola VARIABLE sposta sempre la traccia (manuale, p. 22).
+  const r =
+    s.menu === "Math" && s.math
+      ? scopeRows()[s.operation === "FFT" ? 3 : 1]
+      : scopeRows()[preferredRow];
   if (r?.knob) {
     r.knob(d);
     changed(r.acquire);
@@ -2181,6 +2308,9 @@ function setupScope() {
     if (!s.on) {
       stopProgram();
       capture = null;
+      pending = null;
+      averageState = null;
+      etState = null;
       overlay = [];
       s.goActive = false;
       help = null;
@@ -2242,7 +2372,8 @@ function setupScope() {
         () => {
           clearScreen = true;
           overlay = [];
-          if (s.running) needsCapture = true;
+          averageState = null;
+          etState = null;
         },
         { id: "s-erase" },
       ),
@@ -2303,7 +2434,9 @@ function setupScope() {
           "scale-" + i,
           "Volts/div",
           (d) => {
-            s.channels[i].scale = scaleStep(voltSteps, s.channels[i].scale, -d);
+            if (s.selected === "MATH" && fftActive())
+              s.fftUnit = scaleStep([1, 2, 5, 10, 20], s.fftUnit, -d);
+            else s.channels[i].scale = scaleStep(voltSteps, s.channels[i].scale, -d);
           },
           true,
         ),
@@ -2340,6 +2473,7 @@ function setupScope() {
         () => {
           s.math = s.menu === "Math" ? !s.math : true;
           s.menu = "Math";
+          s.selected = s.math ? "MATH" : "CH1";
         },
         { id: "s-math" },
       ),
@@ -2365,33 +2499,23 @@ function setupScope() {
 
 let triggerStatus = "AUTO",
   lastTrigger = -Infinity;
-const isDynamic = () =>
-  (g.on && (g.mode !== "CONT" || g.wave === "NOISE")) ||
-  s.horizontal === "Roll" ||
-  s.goActive ||
-  triggerStatus === "Trig?";
+// Stato del motore di acquisizione.
+let pending = null,
+  nextArm = 0,
+  averageState = null,
+  etState = null,
+  rollState = null,
+  analogCache = null;
+const ADC_CODES_PER_DIV = 25,
+  ADC_MIN = -128,
+  ADC_MAX = 127,
+  REALTIME_MAX = 100e6,
+  DISPLAY_POINTS_PER_DIV = 25,
+  PROCESSED_POINTS = 500;
 const divisions = () => (s.menuOn ? 10 : 12);
 const visibleTime = () => (s.horizontal === "Window Zoom" ? s.zoom : s.time);
-const videoStandards = {
-  ntsc: { lines: 525, fields: 60000 / 1001 },
-  pal: { lines: 625, fields: 50 },
-  secam: { lines: 625, fields: 50 },
-};
-function videoAt(kind, t) {
-  const { lines, fields } = videoStandards[kind];
-  const lineTime = 2 / (lines * fields);
-  const phase = t / lineTime - Math.floor(t / lineTime);
-  if (phase < 0.074) return -0.3;
-  if (phase < 0.18 || phase > 0.97) return 0;
-  return 0.1 + 0.55 * Math.sin((Math.PI * (phase - 0.18)) / 0.79) ** 2;
-}
-const getExt = (pair, t) =>
-  lab.ext === "sync"
-    ? syncAt(t)
-    : lab.ext === "cal"
-      ? calibrationAt(t)
-      : nodeValue(pair, lab.ext, t);
-const calibrationAt = (t) => (Math.sin(2 * Math.PI * 1000 * t) >= 0 ? 2 : 0);
+const videoStandards = Physics.videoStandards;
+const calibrationAt = Physics.calibrationAt;
 const mainsAt = (t) => Math.sin(2 * Math.PI * 50 * t);
 const fraction = (t) => t - Math.floor(t);
 function syncAt(t) {
@@ -2400,8 +2524,10 @@ function syncAt(t) {
   let high;
   switch (g.mode) {
     case "AM":
-    case "FM":
       high = fraction(t * g.modFreq * 2) < Math.max(4e-7 * g.modFreq, 0.01);
+      break;
+    case "FM":
+      high = fraction(t * g.fmFreq * 2) < Math.max(4e-7 * g.fmFreq, 0.01);
       break;
     case "FSK":
       high =
@@ -2448,88 +2574,111 @@ const externalAt = (t) =>
 Object.defineProperty(externalAt, "periodHz", {
   get: () => (lab.mod === "cal" ? 1000 : lab.mod === "line" ? 50 : 0),
 });
-function nodeValue(pair, node, t) {
-  if (node === "cal") return calibrationAt(t);
-  if (node in videoStandards) return videoAt(node, t);
-  if (node === "in") return pair[0];
-  if (node === "out") return pair[1];
+
+// Tabella 5-2 del manuale: la memoria copre circa 20 divisioni. La frequenza
+// di campionamento è il valore 1-2,5-5 non superiore a L/(20·Time/div), con
+// un massimo di 100 MSa/s in tempo reale. Sotto 250 ns/div, con 500 punti,
+// lo strumento passa al campionamento in tempo equivalente (fino a 25 GSa/s).
+function seriesFloor(x) {
+  const e = Math.floor(Math.log10(x));
+  let best = 0;
+  for (const k of [e - 1, e])
+    for (const m of [1, 2.5, 5]) {
+      const v = Number((m * 10 ** k).toPrecision(3));
+      if (v <= x * (1 + 1e-9)) best = v;
+    }
+  return best;
+}
+const lengthAvailable = (length, time) =>
+  length === 500 || length / (20 * time) <= 125e6 * (1 + 1e-9);
+function effectiveLength(time = s.time) {
+  return [...lengths]
+    .reverse()
+    .find((length) => length <= s.recordLength && lengthAvailable(length, time));
+}
+function acquisitionPlan(time = s.time) {
+  const length = effectiveLength(time);
+  const required = length / (20 * time);
+  if (required > 125e6 * (1 + 1e-9))
+    return { length, fs: 25 / time, et: true, time };
+  return {
+    length,
+    fs: Math.min(REALTIME_MAX, seriesFloor(required)),
+    et: false,
+    time,
+  };
+}
+
+// Rumore dello stadio d'ingresso (stima, non dichiarata dal costruttore):
+// 0,2 mV più 0,02 divisioni efficaci, riferiti al BNC.
+let seed = 0x2545f491;
+function uniform() {
+  seed ^= seed << 13;
+  seed ^= seed >>> 17;
+  seed ^= seed << 5;
+  return (seed >>> 0) / 4294967296;
+}
+function gaussian() {
+  return (
+    Math.sqrt(-2 * Math.log(uniform() + 1e-12)) * Math.cos(2 * Math.PI * uniform())
+  );
+}
+const noiseSigma = (channel) => 0.2e-3 + 0.02 * channel.scale;
+
+// Convertitore A/D a 8 bit: 25 livelli per divisione (manuale di
+// programmazione, template da −100 a +100 su 8 divisioni), codici da −128 a
+// +127 attorno al centro dello schermo. Oltre ±5,12 div il segnale satura.
+function adc(volts, channel) {
+  const lsb = channel.scale / ADC_CODES_PER_DIV;
+  const code = clamp(Math.round((volts + channel.pos) / lsb), ADC_MIN, ADC_MAX);
+  return code * lsb - channel.pos;
+}
+
+function channelSpecs() {
+  const spec = (i) => ({
+    node: lab.channels[i].node,
+    ac: s.channels[i].coupling === "AC",
+    bw: s.channels[i].bw ? 20e6 : 150e6,
+  });
+  return [
+    spec(0),
+    spec(1),
+    {
+      node: ["in", "out", "cal"].includes(lab.ext) ? lab.ext : "none",
+      ac: false,
+      bw: 150e6,
+    },
+  ];
+}
+const periodicSource = () => !g.on || (g.mode === "CONT" && g.wave !== "NOISE");
+// Tensioni ai BNC (dopo accoppiamento e banda), memorizzate se periodiche.
+function analogWindow(t0, t1) {
+  if (periodicSource()) {
+    if (analogCache?.revision !== changeRevision)
+      analogCache = {
+        revision: changeRevision,
+        fn: Physics.analog(g, lab, channelSpecs(), 0, 1, externalAt),
+      };
+    return analogCache.fn;
+  }
+  return Physics.analog(g, lab, channelSpecs(), t0, t1, externalAt);
+}
+// Segnale visto dal canale dopo la sonda fisica e l'inversione.
+function channelVolts(values, j) {
+  const c = s.channels[j];
+  if (c.coupling === "GND") return 0;
+  return (values[j] / lab.channels[j].probe) * (c.invert ? -1 : 1);
+}
+function externalVolts(values, t) {
+  if (lab.ext === "sync") return syncAt(t);
+  if (lab.ext === "cal" || lab.ext === "in" || lab.ext === "out") return values[2];
   return 0;
 }
-function sampleRate() {
-  if (
-    s.time < 250e-9 &&
-    s.recordLength === 500 &&
-    s.trigMode !== "Single" &&
-    !isDynamic()
-  )
-    return 25 / s.time;
-  return Math.min(
-    100e6,
-    (25 / s.time) *
-      [1, 2, 5, 10, 20, 40, 100, 200][lengths.indexOf(s.recordLength)],
-  );
-}
-function digital(value, channel) {
-  const step = channel.scale / 25;
-  return (
-    Math.round(
-      clamp(
-        value,
-        -4.8 * channel.scale - channel.pos,
-        4.8 * channel.scale - channel.pos,
-      ) / step,
-    ) * step
-  );
-}
-function physicalCutoff(bw) {
-  return bw ? 20e6 : 150e6;
-}
-function frontEnd(channel, entry, fn, t, pair, bias) {
-  if (channel.coupling === "GND") return 0;
-  let v = nodeValue(pair, entry.node, t);
-  const hz = entry.node === "cal" ? 1000 : g.freq;
-  if (
-    g.wave === "SINE" &&
-    g.mode === "CONT" &&
-    ["in", "out"].includes(entry.node)
-  ) {
-    const cutoff = physicalCutoff(channel.bw);
-    const analogPhase = Math.atan(hz / cutoff);
-    const hp = channel.coupling === "AC" ? Math.atan(10 / hz) : 0;
-    const node = entry.node === "in" ? 0 : 1;
-    const time = t + (hp - analogPhase) / (2 * Math.PI * hz);
-    const dc = bias[node];
-    v =
-      (fn(time)[node] - dc) * Math.cos(analogPhase) * Math.cos(hp) +
-      (channel.coupling === "AC" ? 0 : dc);
-  } else {
-    if (channel.coupling === "AC") {
-      const dc =
-        entry.node === "in"
-          ? bias[0]
-          : entry.node === "out"
-            ? bias[1]
-            : entry.node === "cal"
-              ? 1
-              : entry.node in videoStandards
-                ? 0.3
-                : 0;
-      v = (v - dc) / Math.hypot(1, 10 / hz);
-    }
-    if (
-      hz > physicalCutoff(channel.bw) / 8 &&
-      ["in", "out"].includes(entry.node)
-    ) {
-      const tau = 1 / (2 * Math.PI * physicalCutoff(channel.bw));
-      const node = entry.node === "in" ? 0 : 1;
-      v =
-        0.4 * v +
-        0.35 * fn(t - tau)[node] +
-        0.2 * fn(t - tau * 2)[node] +
-        0.05 * fn(t - tau * 4)[node];
-    }
-  }
-  return (v / entry.probe) * (channel.invert ? -1 : 1);
+function triggerSourceAt(fe, t) {
+  if (s.trigSource === "Line") return mainsAt(t);
+  const values = fe(t);
+  if (s.trigSource === "EXT") return externalVolts(values, t);
+  return channelVolts(values, s.trigSource === "CH2" ? 1 : 0);
 }
 function filterTrigger(values, dt) {
   if (s.trigCoupling !== "AC" && s.reject === "Off") return values;
@@ -2542,7 +2691,21 @@ function filterTrigger(values, dt) {
     return s.reject === "HF" ? low : s.reject === "LF" ? y - low : y;
   });
 }
-function findTrigger(fn, center, period, bias) {
+function signalPeriod() {
+  if (s.trigSource === "Line") return 0.02;
+  const node =
+    s.trigSource === "EXT"
+      ? lab.ext
+      : lab.channels[s.trigSource === "CH2" ? 1 : 0].node;
+  if (node === "cal") return 0.001;
+  if (node === "sync" || node === "in" || node === "out")
+    return 1 / (g.wave === "NOISE" ? 1e5 : g.freq);
+  return 1 / g.freq;
+}
+// Il circuito di trigger è analogico: confronta il segnale continuo con il
+// livello e marca l'istante dell'evento, indipendentemente dai campioni.
+// Cerca il primo evento valido nell'intervallo [from, to].
+function findTrigger(fe, from, to, period) {
   if (s.trigType === "Video") {
     const i = s.trigSource === "CH2" ? 1 : 0,
       node = lab.channels[i].node;
@@ -2550,46 +2713,32 @@ function findTrigger(fn, center, period, bias) {
       node !== s.videoStandard.toLowerCase() ||
       s.channels[i].coupling === "GND" ||
       s.channels[i].invert !== (s.slope === "Rising")
-    ) {
+    )
       return { time: null, hz: NaN };
-    }
     const { lines, fields } = videoStandards[node],
       line = 2 / (lines * fields),
       frame = 2 / fields;
-    const from = s.videoField === "Field 2" ? Math.ceil(lines / 2) : 0;
+    const first = s.videoField === "Field 2" ? Math.ceil(lines / 2) : 0;
     const fieldLines =
       s.videoField === "Field 2" ? Math.floor(lines / 2) : Math.ceil(lines / 2);
-    const offset = (from + Math.min(fieldLines, s.videoLine) - 1) * line;
+    const offset = (first + Math.min(fieldLines, s.videoLine) - 1) * line;
     const at =
       s.videoField === "Line"
-        ? Math.floor(center / line) * line
-        : Math.floor((center - offset) / frame) * frame + offset;
-    return { time: at, hz: NaN };
+        ? Math.ceil(from / line) * line
+        : Math.ceil((from - offset) / frame) * frame + offset;
+    return { time: at <= to ? at : null, hz: NaN };
   }
-  const duration = Math.max(period * 8, Math.min(2, s.time * 6));
-  const end = center,
-    start = end - duration;
-  const n = clamp(Math.ceil((duration / period) * 90), 720, 3500);
+  const duration = Math.max(to - from, 1e-12);
+  const n = clamp(Math.ceil((duration / period) * 90), 720, 20000);
   const dt = duration / n;
-  const sourceIndex = s.trigSource === "CH2" ? 1 : 0;
-  const times = Array.from({ length: n + 1 }, (_, i) => start + i * dt);
+  const times = Array.from({ length: n + 1 }, (_, i) => from + i * dt);
   const values = filterTrigger(
-    times.map((t) => {
-      if (s.trigSource === "Line") return mainsAt(t);
-      if (s.trigSource === "EXT") return getExt(fn(t), t);
-      return frontEnd(
-        s.channels[sourceIndex],
-        lab.channels[sourceIndex],
-        fn,
-        t,
-        fn(t),
-        bias,
-      );
-    }),
+    times.map((t) => triggerSourceAt(fe, t)),
     dt,
   );
   const min = Math.min(...values),
     max = Math.max(...values);
+  const sourceIndex = s.trigSource === "CH2" ? 1 : 0;
   const sensitivity =
     (s.trigSource === "EXT"
       ? 0.05
@@ -2607,11 +2756,10 @@ function findTrigger(fn, center, period, bias) {
   )
     s.level = (min + max) / 2;
   const r = s.slope === "Rising";
-  const edges = Physics.crossings(values, s.level, r, dt, start);
-  const inverse = () => Physics.crossings(values, s.level, !r, dt, start);
+  const edges = Physics.crossings(values, s.level, r, dt, from);
   let candidates = edges;
   if (s.trigType === "Pulse") {
-    const exit = inverse();
+    const exit = Physics.crossings(values, s.level, !r, dt, from);
     const compare = (v) =>
       s.pulseWhen === "<"
         ? v < s.pulseWidth
@@ -2627,17 +2775,13 @@ function findTrigger(fn, center, period, bias) {
   }
   if (s.trigType === "Delay") {
     const level =
-      s.delayLevel === "TTL"
-        ? 1.4
-        : s.delayLevel === "ECL"
-          ? -1.3
-          : s.startLevel;
+      s.delayLevel === "TTL" ? 1.4 : s.delayLevel === "ECL" ? -1.3 : s.startLevel;
     const ext = Physics.crossings(
-      times.map((t) => getExt(fn(t), t)),
+      times.map((t) => externalVolts(fe(t), t)),
       level,
       true,
       dt,
-      start,
+      from,
     );
     candidates = ext
       .map((t) => {
@@ -2650,152 +2794,304 @@ function findTrigger(fn, center, period, bias) {
       })
       .filter(Number.isFinite);
   }
-  const last = candidates.at(-1);
-  const interval = edges.at(-1) - edges.at(-2);
+  const interval = edges[1] - edges[0];
   return {
-    time: last ?? null,
+    time: candidates[0] ?? null,
     hz: Number.isFinite(interval) && interval > 0 ? 1 / interval : NaN,
   };
 }
-function acquire() {
-  if (!s.on || !s.running) return false;
-  const stable = g.mode === "CONT" && g.wave !== "NOISE";
-  let center =
-    stable && s.horizontal !== "Roll" && s.trigMode !== "Single" ? 0 : now();
-  if (
-    g.singleMode &&
-    g.firedAt > lastTrigger &&
-    g.firedAt > 0 &&
-    g.mode === "BURST" &&
-    s.trigMode === "Single"
-  )
-    center = g.firedAt + Math.min(g.settings.burstCount, 4) / g.freq;
-  const dt = 1 / sampleRate(),
-    half = ((s.recordLength - 1) / 2) * dt;
-  const period =
-    s.trigSource === "Line"
-      ? 0.02
-      : (s.trigSource === "EXT" && lab.ext === "cal") ||
-          (/^CH[12]$/.test(s.trigSource) &&
-            lab.channels[s.trigSource === "CH2" ? 1 : 0].node === "cal")
-        ? 0.001
-        : 1 / (g.wave === "NOISE" ? 1e5 : g.freq);
-  const extent = Math.max(half, (divisions() / 2) * s.time) + Math.abs(s.pos);
-  const lookback = Math.max(period * 9, Math.min(2, s.time * 7));
-  const fn = Physics.signal(
-    g,
-    lab,
-    center - extent - lookback,
-    center + extent + period,
-    externalAt,
-  );
-  const bias = Physics.transfer(lab, 0).map(
-    (z) => z[0] * g.offset * (g.term === "50 Ω" ? 2 : 1),
-  );
-  const trigger =
-    s.horizontal === "Roll"
-      ? { time: null, hz: NaN }
-      : findTrigger(fn, center, period, bias);
-  if (
-    trigger.time === null &&
-    s.horizontal !== "Roll" &&
-    ["Normal", "Single"].includes(s.trigMode)
-  ) {
-    triggerStatus = "Trig?";
-    return false;
+
+const isRoll = () =>
+  s.horizontal === "Roll" ||
+  (s.trigMode !== "Normal" &&
+    s.trigMode !== "Single" &&
+    s.time >= 0.25 &&
+    s.horizontal !== "XY");
+// Tempo morto fra due acquisizioni: elaborazione e trasferimento al display.
+const deadTime = (length) => 0.04 + length * 0.4e-6;
+
+// Arma una nuova acquisizione: la memoria circolare deve prima riempire la
+// parte di pre-trigger, poi si attende l'evento e la parte di post-trigger.
+function armAcquisition(t) {
+  const plan = acquisitionPlan();
+  const duration = plan.et ? 20 * s.time : plan.length / plan.fs;
+  const recordStart = s.pos - duration / 2;
+  const pre = Math.max(0, -recordStart),
+    post = Math.max(0, recordStart + duration);
+  pending = {
+    plan,
+    duration,
+    recordStart,
+    pre,
+    post,
+    armedAt: t,
+    from: t + pre,
+    revision: changeRevision,
+    trigger: null,
+    hz: NaN,
+  };
+}
+function serviceAcquisition(t) {
+  if (!pending) {
+    if (t < nextArm) return false;
+    armAcquisition(t);
   }
-  triggerStatus =
-    trigger.time === null
-      ? s.horizontal === "Roll"
-        ? "ROLL"
-        : "AUTO"
-      : "Trig’d";
-  if (trigger.time !== null) lastTrigger = trigger.time;
-  const origin =
-    trigger.time ??
-    (s.horizontal === "Roll"
-      ? center - (divisions() / 2) * s.time - s.pos
-      : center);
-  const start = s.pos - half,
-    length = s.recordLength;
-  const peak = s.acq === "Peak" && s.time >= 500e-9;
-  const targets = [new Float64Array(length), new Float64Array(length)];
-  const extrema = peak
-    ? targets.map(() => [new Float64Array(length), new Float64Array(length)])
-    : null;
-  const gainAvg = s.acq === "Average" ? Math.sqrt(s.avg) : 1;
-  for (let i = 0; i < length; i++) {
-    const t = origin + start + i * dt;
-    const pair = fn(t);
-    const before = peak ? fn(t - dt * 0.35) : pair,
-      after = peak ? fn(t + dt * 0.35) : pair;
-    for (const [j, c] of s.channels.entries()) {
-      const entry = lab.channels[j];
-      let value = frontEnd(c, entry, fn, t, pair, bias);
-      if (
-        s.acq === "Average" &&
-        g.wave === "NOISE" &&
-        ["in", "out"].includes(entry.node)
-      ) {
-        const baseline = bias[entry.node === "in" ? 0 : 1] / entry.probe;
-        const mean =
-          c.coupling === "AC" || c.coupling === "GND"
-            ? 0
-            : baseline * (c.invert ? -1 : 1);
-        value = mean + (value - mean) / gainAvg;
-      }
-      value = digital(value, c);
-      targets[j][i] = value;
-      if (peak) {
-        const x = digital(
-            frontEnd(c, entry, fn, t - dt * 0.35, before, bias),
-            c,
-          ),
-          y = digital(frontEnd(c, entry, fn, t + dt * 0.35, after, bias), c);
-        extrema[j][0][i] = Math.min(x, y, value);
-        extrema[j][1][i] = Math.max(x, y, value);
+  const p = pending;
+  if (p.trigger === null) {
+    const period = signalPeriod();
+    if (t - p.from > 1) p.from = t - 1;
+    // Finestra di ricerca: abbastanza periodi per trovare un fronte, ma con
+    // un passo fine rispetto al periodo (90 punti per periodo).
+    const to = Math.max(p.from, t) + Math.min(Math.max(40 * period, 1e-6), 0.02);
+    const fe = analogWindow(p.from - p.duration, to + p.duration);
+    const found = findTrigger(fe, p.from, to, period);
+    if (found.time !== null) {
+      p.trigger = found.time;
+      p.hz = found.hz;
+      p.triggered = true;
+    } else {
+      p.from = to;
+      const auto = s.trigMode === "Auto" || s.trigMode === "Auto Level";
+      const timeout = Math.max(0.15, p.duration);
+      if (auto && t - p.armedAt - p.pre > timeout) {
+        p.trigger = t - p.post;
+        p.triggered = false;
+      } else {
+        // In Normal e Single lo stato diventa «Trig?» finché manca l'evento;
+        // in Auto resta l'ultimo stato fino al trigger forzato.
+        if (!auto) triggerStatus = "Trig?";
+        return false;
       }
     }
   }
-  capture = {
-    values: targets,
-    extrema,
-    dt,
-    start,
-    hz: trigger.hz,
-    equivalent: dt < 1e-8,
-    length,
-    physical: lab.channels.map((c) => c.node),
-    revision: changeRevision,
-  };
-  if (s.trigMode === "Single" && trigger.time !== null) s.running = false;
-  clearScreen = false;
-  ratioTest();
+  if (t < p.trigger + p.post) return false;
+  completeAcquisition(p);
+  pending = null;
+  nextArm = t + deadTime(p.plan.length);
   return true;
 }
+
+// Costruisce il record: L campioni a 1/fs su un clock libero, con lo
+// sfasamento fra clock e trigger misurato e corretto dallo strumento.
+function completeAcquisition(p) {
+  const { plan } = p;
+  const dt = 1 / plan.fs;
+  const absoluteStart = p.trigger + p.recordStart;
+  const fe = analogWindow(absoluteStart - p.duration, absoluteStart + 2 * p.duration);
+  const averaging = s.acq === "Average";
+  const peak = s.acq === "Peak" && s.time >= 500e-9 && !plan.et;
+  let values, extrema, start, length;
+  if (plan.et) {
+    ({ values, start, length } = equivalentTime(p, fe));
+  } else {
+    length = plan.length;
+    const phase = averaging ? 0 : uniform();
+    start = p.recordStart + phase * dt;
+    values = [new Float64Array(length), new Float64Array(length)];
+    extrema = peak
+      ? values.map(() => [new Float64Array(length), new Float64Array(length)])
+      : null;
+    const hiRes = averaging && length > 500;
+    const adcPerSample = Math.max(1, dt * REALTIME_MAX);
+    const sub = peak || hiRes ? Math.min(12, Math.ceil(adcPerSample)) : 1;
+    for (let i = 0; i < length; i++) {
+      const t = p.trigger + start + i * dt;
+      const pair = fe(t);
+      for (let j = 0; j < 2; j++) {
+        const c = s.channels[j];
+        const sigma = noiseSigma(c);
+        if (hiRes) {
+          // Media su più conversioni nello stesso intervallo: risoluzione
+          // migliore e rumore ridotto (manuale, p. 42).
+          let sum = 0;
+          for (let k = 0; k < sub; k++)
+            sum += channelVolts(fe(t + (k * dt) / sub), j);
+          values[j][i] =
+            sum / sub + (sigma * gaussian()) / Math.sqrt(adcPerSample);
+          continue;
+        }
+        const first = adc(channelVolts(pair, j) + sigma * gaussian(), c);
+        values[j][i] = first;
+        if (peak) {
+          let lo = first,
+            hi = first;
+          for (let k = 1; k < sub; k++) {
+            const v = adc(channelVolts(fe(t + (k * dt) / sub), j) + sigma * gaussian(), c);
+            lo = Math.min(lo, v);
+            hi = Math.max(hi, v);
+          }
+          extrema[j][0][i] = lo;
+          extrema[j][1][i] = hi;
+        }
+      }
+    }
+  }
+  if (averaging && !plan.et && plan.length === 500) values = average(values, p);
+  const triggered = p.triggered;
+  triggerStatus = triggered ? "Trig’d" : "AUTO";
+  if (triggered) lastTrigger = p.trigger;
+  capture = {
+    values,
+    extrema,
+    dt: plan.et ? (20 * s.time) / PROCESSED_POINTS : dt,
+    start,
+    length,
+    hz: p.hz,
+    fs: plan.fs,
+    equivalent: plan.et,
+    time: s.time,
+    duration: p.duration,
+    physical: lab.channels.map((c) => c.node),
+    revision: p.revision,
+  };
+  if (s.trigMode === "Single" && triggered) s.running = false;
+  clearScreen = false;
+  ratioTest();
+}
+// Media di N acquisizioni allineate al trigger (solo con memoria di 500 punti).
+function average(values, p) {
+  const key = p.revision + "|" + s.avg;
+  if (averageState?.key !== key)
+    averageState = { key, count: 0, values: values.map((v) => Float64Array.from(v)) };
+  const state = averageState;
+  state.count++;
+  const weight = 1 / Math.min(state.count, s.avg);
+  for (let j = 0; j < 2; j++)
+    for (let i = 0; i < values[j].length; i++)
+      state.values[j][i] += (values[j][i] - state.values[j][i]) * weight;
+  return state.values.map((v) => Float64Array.from(v));
+}
+// Tempo equivalente asincrono: a ogni trigger il clock a 100 MSa/s ha uno
+// sfasamento casuale; i campioni vanno nelle celle del record da 500 punti
+// secondo il loro ritardo dal trigger. Il segnale deve essere ripetitivo.
+function equivalentTime(p, fe) {
+  const bins = PROCESSED_POINTS,
+    dtEq = p.duration / bins;
+  const key = p.revision + "|" + s.time + "|" + s.pos;
+  if (etState?.key !== key)
+    etState = {
+      key,
+      values: [new Float64Array(bins).fill(NaN), new Float64Array(bins).fill(NaN)],
+    };
+  const step = 1 / REALTIME_MAX;
+  const passes = 24;
+  for (let pass = 0; pass < passes; pass++) {
+    const phase = uniform() * step;
+    for (let t = p.recordStart + phase; t < p.recordStart + p.duration; t += step) {
+      const bin = Math.floor((t - p.recordStart) / dtEq);
+      if (bin < 0 || bin >= bins) continue;
+      const values = fe(p.trigger + t);
+      for (let j = 0; j < 2; j++)
+        etState.values[j][bin] = adc(
+          channelVolts(values, j) + noiseSigma(s.channels[j]) * gaussian(),
+          s.channels[j],
+        );
+    }
+  }
+  return {
+    values: etState.values.map((v) => Float64Array.from(v)),
+    start: p.recordStart + dtEq / 2,
+    length: bins,
+  };
+}
+// Roll: le nuove acquisizioni entrano da destra senza attendere il trigger.
+function rollAcquisition(t) {
+  const plan = acquisitionPlan();
+  const dt = 1 / plan.fs,
+    span = divisions() * s.time;
+  if (rollState?.revision !== changeRevision) rollState = { revision: changeRevision, since: t };
+  const k0 = Math.ceil((t - span) / dt),
+    k1 = Math.floor(t / dt);
+  const length = Math.max(0, k1 - k0 + 1);
+  const fe = analogWindow(t - 2 * span, t + span);
+  const values = [new Float64Array(length), new Float64Array(length)];
+  for (let i = 0; i < length; i++) {
+    const time = (k0 + i) * dt;
+    const pair = time < rollState.since ? null : fe(time);
+    for (let j = 0; j < 2; j++)
+      values[j][i] = pair
+        ? adc(channelVolts(pair, j) + noiseSigma(s.channels[j]) * gaussian(), s.channels[j])
+        : NaN;
+  }
+  triggerStatus = s.horizontal === "Roll" ? "ROLL" : "AUTO";
+  capture = {
+    values,
+    extrema: null,
+    dt,
+    start: s.pos - span / 2 + (k0 * dt - (t - span)),
+    length,
+    hz: NaN,
+    fs: plan.fs,
+    equivalent: false,
+    time: s.time,
+    duration: length * dt,
+    physical: lab.channels.map((c) => c.node),
+    revision: changeRevision,
+    roll: true,
+  };
+}
+
+// I 500 punti elaborati: il record intero ricondotto a 500 punti
+// (manuale, p. 13). Misure automatiche e FFT lavorano su questi.
+function processedPoints(values) {
+  if (!capture) return new Float64Array();
+  if (values.length <= PROCESSED_POINTS) return values;
+  const step = values.length / PROCESSED_POINTS;
+  return Float64Array.from({ length: PROCESSED_POINTS }, (_, i) => values[Math.floor(i * step)]);
+}
+const processedDt = () =>
+  capture ? (capture.length * capture.dt) / Math.min(capture.length, PROCESSED_POINTS) : 0;
+
+// Punti disegnati: 25 per divisione (250 col menu, 300 senza), presi dal
+// record. Con l'acquisizione ferma si può esplorare la memoria.
 function viewSlice() {
   const empty = [new Float64Array(), new Float64Array()];
-  if (!capture) return { values: empty, dt: 0, start: 0, end: 0 };
-  const center = s.pos,
-    span = divisions() * visibleTime(),
-    a = center - span / 2,
-    b = center + span / 2;
-  const first = clamp(
-    Math.ceil((a - capture.start) / capture.dt),
-    0,
-    capture.length,
-  );
+  if (!capture)
+    return { values: empty, times: new Float64Array(), dt: 0, start: 0, end: 0 };
+  const cols = divisions(),
+    span = cols * visibleTime(),
+    left = s.pos - span / 2,
+    right = left + span;
+  const first = clamp(Math.ceil((left - capture.start) / capture.dt - 1e-9), 0, capture.length);
   const last = clamp(
-    Math.floor((b - capture.start) / capture.dt) + 1,
-    first,
-    capture.length,
+    Math.floor((right - capture.start) / capture.dt + 1e-9),
+    first - 1,
+    capture.length - 1,
   );
+  const count = last - first + 1;
+  const points = cols * DISPLAY_POINTS_PER_DIV;
+  const index =
+    count <= points + 1
+      ? Array.from({ length: Math.max(0, count) }, (_, i) => first + i)
+      : Array.from({ length: points + 1 }, (_, j) => first + Math.round((j * (count - 1)) / points));
+  const times = Float64Array.from(index, (i) => capture.start + i * capture.dt);
+  const group = (k) => [
+    k ? Math.floor((index[k - 1] + index[k]) / 2) + 1 : index[0],
+    k < index.length - 1 ? Math.floor((index[k] + index[k + 1]) / 2) : index.at(-1),
+  ];
+  const extrema = capture.extrema?.map(([lo, hi]) => {
+    const a = new Float64Array(index.length),
+      b = new Float64Array(index.length);
+    index.forEach((_, k) => {
+      const [from, to] = group(k);
+      let min = Infinity,
+        max = -Infinity;
+      for (let i = from; i <= to; i++) {
+        min = Math.min(min, lo[i]);
+        max = Math.max(max, hi[i]);
+      }
+      a[k] = min;
+      b[k] = max;
+    });
+    return [a, b];
+  });
   return {
-    values: capture.values.map((v) => v.subarray(first, last)),
-    extrema: capture.extrema?.map((v) => v.map((k) => k.subarray(first, last))),
-    dt: capture.dt,
-    start: capture.start + first * capture.dt,
-    end: capture.start + (last - 1) * capture.dt,
+    values: capture.values.map((v) => Float64Array.from(index, (i) => v[i])),
+    extrema,
+    times,
+    dt: times.length > 1 ? times[1] - times[0] : capture.dt,
+    start: times[0] ?? 0,
+    end: times.at(-1) ?? 0,
   };
 }
 function mathScale() {
@@ -2808,6 +3104,15 @@ function mathValues(view) {
   return a.map(
     (v, i) => v * s.channels[0].probe + sign * b[i] * s.channels[1].probe,
   );
+}
+const fftActive = () => s.math && s.operation === "FFT";
+// FFT sui 500 punti elaborati: 250 righe da 0 a fs/2, 25 righe per divisione.
+function fftData() {
+  if (!capture) return null;
+  const c = s.channels[s.fftSource];
+  const data = processedPoints(capture.values[s.fftSource]).map((v) => v * c.probe);
+  const fs = 1 / processedDt();
+  return { bins: Physics.spectrum(data, s.fftWindow), hzPerDiv: fs / 20, fs };
 }
 let metricCache = {};
 function metricsLabel(i) {
@@ -2830,24 +3135,27 @@ function updateMetrics() {
     metricCache = {};
     return;
   }
-  const measureT = s.cursorTMode !== "Off" && s.cursorT[0] !== s.cursorT[1];
-  let a = 0,
-    b = capture.length;
-  if (measureT) {
-    a = clamp(
-      Math.ceil((Math.min(...s.cursorT) + s.pos - capture.start) / capture.dt),
-      0,
-      b,
-    );
-    b = clamp(
-      Math.ceil((Math.max(...s.cursorT) + s.pos - capture.start) / capture.dt),
-      a,
-      b,
-    );
-  }
-  metricCache = capture.values.map((v) =>
-    Physics.measures(v.subarray(a, b), capture.dt),
-  );
+  const dt = processedDt();
+  const start = capture.start;
+  const measureT =
+    s.cursorSource !== 2 && s.cursorTMode !== "Off" && s.cursorT[0] !== s.cursorT[1];
+  metricCache = capture.values.map((all, j) => {
+    let v = processedPoints(all);
+    if (measureT) {
+      const a = clamp(Math.ceil((Math.min(...s.cursorT) + s.pos - start) / dt), 0, v.length);
+      const b = clamp(Math.ceil((Math.max(...s.cursorT) + s.pos - start) / dt), a, v.length);
+      v = v.subarray(a, b);
+    }
+    const finite = v.filter(Number.isFinite);
+    const result = Physics.measures(finite, dt);
+    if (capture.extrema) {
+      const [lo, hi] = capture.extrema[j];
+      result.Vmax = Math.max(...hi);
+      result.Vmin = Math.min(...lo);
+      result.Vpp = result.Vmax - result.Vmin;
+    }
+    return result;
+  });
 }
 
 const canvas = $("trace"),
@@ -2926,22 +3234,31 @@ function traceCanvas() {
   ctx.beginPath();
   ctx.rect(x, y, gw, gh);
   ctx.clip();
-  function plot(values, color, time, volts, showDots = false, samples = 300) {
+  function plot(values, color, time, volts, showDots = false) {
     if (!values?.length) return;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.lineWidth = 1.25;
     ctx.beginPath();
-    const skip = Math.max(1, Math.ceil(values.length / samples));
-    for (let i = 0; i < values.length; i += skip) {
+    let open = false;
+    for (let i = 0; i < values.length; i++) {
+      if (!Number.isFinite(values[i])) {
+        open = false;
+        continue;
+      }
       const vx = time(i),
         v = volts(values[i]);
-      if (showDots) ctx.fillRect(vx, v, 1.8, 1.8);
-      else if (i) ctx.lineTo(vx, v);
+      if (showDots) ctx.fillRect(vx - 0.8, v - 0.8, 1.8, 1.8);
+      else if (open) ctx.lineTo(vx, v);
       else ctx.moveTo(vx, v);
+      open = true;
     }
     if (!showDots) ctx.stroke();
   }
+  const fft = fftActive() ? fftData() : null;
+  // Linea M dello spettro: 0 dB = 1 Vrms (manuale, p. 24).
+  const fftY = (db) => y + gh * (0.5 - s.fftPos / 8) - (db / s.fftUnit) * (gh / 8);
+  const fftX = (k) => x + (gw * k) / (DISPLAY_POINTS_PER_DIV * cols);
   if (capture && count && !clearScreen) {
     if (s.horizontal === "XY") {
       const a = s.channels[0],
@@ -2953,25 +3270,24 @@ function traceCanvas() {
         (v) => vy(v, b.scale, b.pos),
         s.draw === "Dot",
       );
-    } else if (s.math && s.operation === "FFT" && count >= 8) {
-      const c = s.channels[s.fftSource];
-      const fft = Physics.spectrum(view.values[s.fftSource], s.fftWindow);
-      const range = Math.max(1, Math.floor((fft.length - 1) / s.fftZoom));
+    } else if (fft) {
+      const bins = fft.bins.subarray(0, Math.min(fft.bins.length, DISPLAY_POINTS_PER_DIV * cols + 1));
       plot(
-        fft.subarray(0, range + 1),
+        Float64Array.from(bins, (v) => 20 * Math.log10(Math.max(v, 1e-9))),
         palette[2],
-        (i) => x + (gw * i) / range,
-        (v) =>
-          y + (gh * (10 - clamp(20 * Math.log10(v * c.probe), -90, 10))) / 100,
+        fftX,
+        (db) => clamp(fftY(db), y - 2, y + gh + 2),
+        s.draw === "Dot",
       );
       ctx.fillStyle = palette[2];
+      ctx.fillText("M", x + 2, clamp(fftY(0), y + 9, y + gh) - 2);
       ctx.fillText(
-        "FFT · " + si(1 / (2 * view.dt * s.fftZoom), "Hz") + " · 12.5 dB/div",
-        x + 5,
+        "FFT CH" + (s.fftSource + 1) + " · " + si(fft.hzPerDiv, "Hz") + "/div · " + s.fftUnit + " dB/div · " + s.fftWindow,
+        x + 14,
         y + 13,
       );
     } else {
-      const pointAt = (i) => tx(view.start + i * view.dt);
+      const pointAt = (i) => tx(view.times[i]);
       if (s.persist) {
         ctx.globalAlpha = 0.17;
         for (const frame of overlay)
@@ -2980,7 +3296,7 @@ function traceCanvas() {
               plot(
                 values,
                 palette[j],
-                (i) => tx(frame.start + i * frame.dt),
+                (i) => tx(frame.times[i]),
                 (v) => vy(v, s.channels[j].scale, s.channels[j].pos),
                 s.draw === "Dot",
               );
@@ -2993,16 +3309,9 @@ function traceCanvas() {
           ctx.beginPath();
           ctx.strokeStyle = palette[j];
           ctx.lineWidth = 0.8;
-          const step = Math.max(1, Math.floor(count / gw));
-          for (let i = 0; i < count; i += step) {
-            let min = view.extrema[j][0][i],
-              max = view.extrema[j][1][i];
-            for (let k = i + 1; k < Math.min(count, i + step); k++) {
-              min = Math.min(min, view.extrema[j][0][k]);
-              max = Math.max(max, view.extrema[j][1][k]);
-            }
-            ctx.moveTo(pointAt(i), vy(min, c.scale, c.pos));
-            ctx.lineTo(pointAt(i), vy(max, c.scale, c.pos));
+          for (let i = 0; i < count; i++) {
+            ctx.moveTo(pointAt(i), vy(view.extrema[j][0][i], c.scale, c.pos));
+            ctx.lineTo(pointAt(i), vy(view.extrema[j][1][i], c.scale, c.pos));
           }
           ctx.stroke();
         }
@@ -3034,32 +3343,37 @@ function traceCanvas() {
       }
     }
   }
-  if (
-    s.horizontal !== "XY" &&
-    !(s.math && s.operation === "FFT") &&
-    s.menu === "Cursor"
-  ) {
-    const c = s.channels[s.cursorSource];
+  const cursorOnMath = fft && s.cursorSource === 2;
+  if (s.horizontal !== "XY" && s.menu === "Cursor" && (cursorOnMath || !fft)) {
+    const c = s.channels[Math.min(1, s.cursorSource)];
     ctx.lineWidth = 0.8;
     for (const [axis, values, active] of [
-      ["T", s.cursorT, s.cursorTMode],
-      ["V", s.cursorV, s.cursorVMode],
+      ["T", cursorOnMath ? s.fftCursorF : s.cursorT, s.cursorTMode],
+      ["V", cursorOnMath ? s.fftCursorM : s.cursorV, s.cursorVMode],
     ]) {
       if (active === "Off") continue;
       for (const [i, v] of values.entries()) {
-        const q = axis === "T" ? tx(v + s.pos) : vy(v, c.scale, c.pos);
-        ctx.strokeStyle = i ? "#b6b2a7" : "#f6e3ac";
+        const q =
+          axis === "T"
+            ? cursorOnMath
+              ? x + (gw * v) / cols
+              : tx(v + s.pos)
+            : cursorOnMath
+              ? fftY(v)
+              : vy(v, c.scale, c.pos);
+        ctx.strokeStyle = cursorOnMath && axis === "V" ? "#f08b80" : i ? "#b6b2a7" : "#f6e3ac";
         ctx.fillStyle = ctx.strokeStyle;
         ctx.setLineDash(i ? [4, 3] : []);
         ctx.beginPath();
+        const name = cursorOnMath ? (axis === "T" ? "f" : "M") : axis;
         if (axis === "T") {
           ctx.moveTo(q, y);
           ctx.lineTo(q, y + gh);
-          ctx.fillText(axis + (i + 1), q + 3, y + 11);
+          ctx.fillText(name + (i + 1), q + 3, y + 11);
         } else {
           ctx.moveTo(x, q);
           ctx.lineTo(x + gw, q);
-          ctx.fillText(axis + (i + 1), x + 3, q - 3);
+          ctx.fillText(name + (i + 1), x + 3, q - 3);
         }
         ctx.stroke();
         ctx.setLineDash([]);
@@ -3107,6 +3421,15 @@ function renderScope() {
       ? "HOLD"
       : "STOP";
   const triggerHz = capture?.hz >= 20 ? capture.hz : NaN;
+  // Barra della memoria: parte del record visibile a schermo.
+  const bar = document.querySelector(".memory");
+  if (capture?.duration && !capture.roll) {
+    const span = divisions() * visibleTime();
+    const from = (s.pos - span / 2 - capture.start) / capture.duration,
+      to = (s.pos + span / 2 - capture.start) / capture.duration;
+    bar.style.setProperty("--view-left", clamp(from, 0, 1) * 100 + "%");
+    bar.style.setProperty("--view-right", (1 - clamp(to, 0, 1)) * 100 + "%");
+  }
   $("lcd-status").replaceChildren(
     ...[
       ...s.channels.map(
@@ -3116,8 +3439,10 @@ function renderScope() {
           " " +
           (c.on ? si(c.scale * c.probe, "V") + "/div " + c.coupling : "Off"),
       ),
-      (capture?.equivalent ? "ET " : "") +
-        si(capture ? 1 / capture.dt : NaN, "Sa/s"),
+      (() => {
+        const plan = capture && !s.running ? capture : acquisitionPlan();
+        return (plan.equivalent || plan.et ? "ET " : "") + si(plan.fs, "Sa/s");
+      })(),
       s.horizontal,
       s.trigType + " " + s.trigSource + " " + s.trigMode,
       s.acq.toUpperCase(),
@@ -3413,6 +3738,24 @@ function setupLab() {
       changed();
     };
   }
+  // Cavi coassiali RG-58 (circa 101 pF/m): caricano l'uscita a 50 Ω del
+  // generatore e limitano banda e tempo di salita misurati.
+  const cableLabel = document.createElement("label"),
+    cableInput = document.createElement("input");
+  cableInput.id = "cable";
+  cableInput.type = "number";
+  cableInput.min = "0";
+  cableInput.max = "5";
+  cableInput.step = "0.1";
+  cableInput.value = lab.cable;
+  cableLabel.append("Cavi coassiali (m)", cableInput);
+  patch.append(cableLabel);
+  cableInput.addEventListener("input", () => {
+    if (cableInput.validity.valid && Number.isFinite(cableInput.valueAsNumber)) {
+      lab.cable = cableInput.valueAsNumber;
+      changed();
+    }
+  });
   const jack = (id, label, target) => {
     const b = document.createElement("button");
     b.type = "button";
@@ -3462,6 +3805,10 @@ function setupLab() {
     s = scopeDefault();
     lab = labDefault();
     capture = null;
+    pending = null;
+    averageState = null;
+    etState = null;
+    rollState = null;
     overlay = [];
     undo = null;
     lastTrigger = -Infinity;
@@ -3480,6 +3827,7 @@ function setupLab() {
     $("circuit").value = lab.circuit;
     $("resistance").value = lab.r;
     $("capacitance").value = 82;
+    $("cable").value = lab.cable;
     changed();
     say("Assetto foto ripristinato");
   };
@@ -3514,7 +3862,9 @@ function hardcopy() {
     23,
   );
   p.fillText(
-    $("lcd-status").textContent.slice(0, Math.floor(png.width / 8)),
+    Array.from($("lcd-status").children, (span) => span.textContent)
+      .join("  ")
+      .slice(0, Math.floor(png.width / 8)),
     10,
     png.height - 10,
   );
@@ -3544,23 +3894,31 @@ function render() {
   renderLab();
   renderScope();
 }
+let shownStatus = "";
 function tick(timestamp) {
-  if (
-    s.on &&
-    s.running &&
-    (needsCapture || isDynamic()) &&
-    timestamp - lastFrame >= 84
-  ) {
-    lastFrame = timestamp;
-    needsCapture = false;
-    if (acquire()) {
+  if (s.on && s.running) {
+    const t = now();
+    let fresh = false;
+    if (isRoll()) {
+      pending = null;
+      if (timestamp - lastFrame >= 40) {
+        lastFrame = timestamp;
+        rollAcquisition(t);
+        fresh = true;
+      }
+    } else {
+      rollState = null;
+      fresh = serviceAcquisition(t);
+    }
+    if (fresh) {
       updateMetrics();
       if (s.persist) {
         overlay.push(viewSlice());
         if (overlay.length > 8) overlay.shift();
       } else overlay = [];
-    }
-    renderScope();
+      renderScope();
+    } else if (triggerStatus !== shownStatus) renderScope();
+    shownStatus = triggerStatus;
   }
   requestAnimationFrame(tick);
 }

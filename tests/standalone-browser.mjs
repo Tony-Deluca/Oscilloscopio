@@ -58,7 +58,7 @@ await send('Page.enable');
 await resize(1410,950);
 await send('Page.navigate',{url:servedUrl});
 await delay(400);
-assert.ok((await js('document.body.innerText')).includes('1.000 Vpp'));
+assert.ok((await js('document.body.innerText')).includes('1.000 VPP'));
 assert.equal(await js('getComputedStyle(document.querySelector(".workbench")).display'),'grid');
 assert.equal(await js('document.querySelectorAll("script[src],link[rel=stylesheet]").length'),0);
 assert.equal(await js('performance.getEntriesByType("resource").filter(resource=>!resource.name.endsWith("/favicon.ico")).length'),0);

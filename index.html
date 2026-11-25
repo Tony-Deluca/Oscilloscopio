@@ -182,22 +182,37 @@
             (Probe) all’attenuazione fisica selezionata nella sezione cablaggio.
           </p>
           <p>
-            <b>Modello.</b> L’uscita del generatore ha 50 Ω fisici. Per il
-            passa-basso, il carico nominale dei canali è 1 MΩ ∥ 22 pF in
-            collegamento diretto. La scheda del filtro mostra il trasferimento
-            ai nodi fisici prima dei controlli del display. Le misure a schermo
-            derivano dai campioni e dipendono da finestra, trigger e scala.
+            <b>Acquisizione.</b> Come nel GDS-820C reale, la frequenza di
+            campionamento dipende da Time/div e dalla lunghezza della memoria
+            (tabella 5-2 del manuale): con 500 punti vale 25 campioni per
+            divisione, fino a 100 MSa/s, e sotto 250 ns/div si passa al tempo
+            equivalente. L’ADC è a 8 bit con 25 livelli per divisione e satura
+            oltre ±5,12 divisioni. Il trigger è analogico e la memoria circolare
+            deve riempire pre-trigger e post-trigger prima di mostrare la
+            traccia: a 100 ms/div servono 2 s. Lo strumento elabora sempre 500
+            punti e ne disegna 25 per divisione; misure e FFT usano i 500 punti.
+            Con l’acquisizione ferma si esplora il record fino a sette scatti
+            più veloci di Time/div. In Sample il campionamento lento produce
+            aliasing; Peak Detect conserva gli estremi; Average fa la media di N
+            acquisizioni.
+          </p>
+          <p>
+            <b>Modello fisico.</b> Il generatore ha 50 Ω d’uscita. Ogni ingresso
+            vale 1 MΩ ∥ 22 pF, la sonda ×10 10 MΩ ∥ 13 pF. I cavi coassiali
+            aggiungono circa 101 pF/m e limitano banda e tempo di salita: con
+            circa 2 m di cavo si ritrovano i 23 ns e il taglio vicino a 15 MHz
+            misurati in laboratorio. Lo stadio d’ingresso ha banda di 150 MHz
+            (20 MHz con BW Limit) e in AC un passa-alto a 10 Hz. Un piccolo
+            rumore d’ingresso, stimato, rende visibili quantizzazione e medie.
           </p>
           <p>
             <b>Copertura.</b> La simulazione riproduce il flusso dei controlli
-            di banco. Campionamento equivalente, filtri analogici,
-            temporizzazione delle modulazioni, algoritmi firmware e sonde
-            ×10/×100 sono approssimati. Porte, stampante e calibrazione vengono
-            rappresentate come funzioni virtuali. La traduzione del display è
-            parziale. I template Go-No Go usano i riferimenti locali, con
-            confronto verticale. L’importazione FreeCapture e le porte fisiche
-            restano fuori dalla simulazione. Il firmware installato nei due
-            esemplari non è leggibile nelle foto.
+            di banco. Restano approssimati gli algoritmi firmware, il tempo di
+            salita intrinseco del generatore (dichiarato solo come inferiore a
+            20 ns) e le sonde ×100. Porte, stampante e calibrazione sono
+            virtuali. L’importazione FreeCapture e le porte fisiche restano
+            fuori dalla simulazione. Il DC del 33120A si ottiene tenendo premuto
+            Offset per più di 2 s, come sullo strumento.
           </p>
           <p>
             <a

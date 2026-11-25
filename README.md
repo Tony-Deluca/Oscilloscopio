@@ -12,6 +12,8 @@ Apri [banco-rc.html](banco-rc.html) in un browser per usare la versione autonoma
 
 ## Verifica locale
 
+Dopo ogni modifica a `index.html`, `style.css`, `physics.js` o `bench.js` rigenera la versione autonoma con `node tools/build-standalone.mjs`.
+
 Esegui `node tests/physics.cjs` per verificare guadagno, fase, frequenza di taglio, risposta al gradino e FFT. I due test browser richiedono Node.js 22.4+ e un profilo Chrome di test avviato con `--remote-debugging-port=9238` e un `--user-data-dir` separato. Esegui `node tests/browser.mjs` oppure `node tests/standalone-browser.mjs`. I test stampano la directory temporanea delle proprie schermate ed esportazioni.
 
-L’interfaccia interpreta i pannelli fisici. La fedeltà al firmware è parziale e R e C sono parametri di simulazione.
+L’interfaccia interpreta i pannelli fisici. Il modello di acquisizione segue il manuale del GDS-820C (campionamento, ADC a 8 bit, memoria, 500 punti elaborati) ed è descritto in [docs/manuali.md](docs/manuali.md). La fedeltà al firmware è parziale e R, C e lunghezza dei cavi sono parametri di simulazione.
