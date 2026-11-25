@@ -194,6 +194,20 @@ button:active {
   letter-spacing: 0.08em;
   min-height: 1.18em;
 }
+.g-reading .flash {
+  animation: digit-flash 1s steps(1) infinite;
+}
+@keyframes digit-flash {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .g-reading .flash {
+    animation: none;
+    text-decoration: underline;
+  }
+}
 .g-reading {
   font-size: clamp(23px, 3vw, 39px);
   line-height: 1.2;

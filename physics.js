@@ -105,7 +105,9 @@ const Physics = (() => {
         settings.amSource === "INT"
           ? shape(settings.amShape, t * g.modFreq)
           : external(t);
-      amplitude *= 1 + (g.depth / 100) * m;
+      // Profondità 0 %: metà dell'ampiezza impostata; 100 %: l'ampiezza
+      // impostata al picco della modulante (User's Guide, «Modulation Depth»).
+      amplitude *= (1 + (g.depth / 100) * m) / 2;
     }
     if (mode === "FM") {
       // Integrale della modulante: la fase resta continua.
@@ -384,7 +386,12 @@ const Physics = (() => {
     const dt = (t1 - start) / n;
     const advance = stepper(lab, dt);
     const dc = transfer(lab, 0).map((z) => z[0]);
-    let state = dc.map((h) => h * g.offset * (g.term === "50 Ω" ? 2 : 1));
+    // Stato iniziale: punto di lavoro in continua per il valor medio della
+    // sorgente, così anche le costanti di tempo lunghe partono a regime.
+    let mean = 0;
+    for (let i = 0; i < 4096; i++)
+      mean += source(g, start + ((i + 0.5) * (t1 - start)) / 4096, external) / 4096;
+    let state = dc.map((h) => h * mean);
     const values = [new Float64Array(n + 1), new Float64Array(n + 1)];
     for (let i = 0; i <= n; i++) {
       if (i) state = advance(state, source(g, start + (i - 0.5) * dt, external));
@@ -530,7 +537,8 @@ const Physics = (() => {
         return periodicLookup(y, table.period);
       }
       transient ??= transientTable(g, lab, t0, t1, external, minTau);
-      const y = frontEndTable(transient.values[k], transient.dt, spec, false, dc[k]);
+      const u = transient.values[k];
+      const y = frontEndTable(u, transient.dt, spec, false, u.reduce((a, b) => a + b, 0) / u.length);
       return linearLookup(y, transient.start, transient.dt);
     });
     return (t) => fns.map((fn) => fn(t));
@@ -543,6 +551,22 @@ const Physics = (() => {
         b = values[i];
       if (rising ? a < level && b >= level : a > level && b <= level)
         result.push(start + (i - 1 + (level - a) / (b - a)) * dt);
+    }
+    return result;
+  }
+  // Passaggi per un livello con isteresi: un nuovo passaggio conta solo dopo
+  // che il segnale è tornato oltre la banda dal lato opposto.
+  function crossingsWithHysteresis(values, level, rising, dt, band) {
+    const result = [];
+    let armed = false;
+    for (let i = 1; i < values.length; i++) {
+      const a = values[i - 1],
+        b = values[i];
+      if (rising ? b < level - band : b > level + band) armed = true;
+      if (armed && (rising ? a < level && b >= level : a > level && b <= level)) {
+        result.push((i - 1 + (level - a) / (b - a)) * dt);
+        armed = false;
+      }
     }
     return result;
   }
@@ -560,19 +584,32 @@ const Physics = (() => {
     }
     const vpp = hi - lo,
       middle = (hi + lo) / 2;
-    const bins = new Uint32Array(64);
+    // Vhi e Vlo: livello più frequente di ciascuna metà (media dei campioni
+    // della classe). Se l'istogramma non ha un picco netto, come in una rampa,
+    // si usano il massimo e il minimo.
+    const bins = new Uint32Array(64),
+      sums = new Float64Array(64);
     if (vpp)
-      for (const v of values)
-        bins[Math.min(63, Math.floor(((v - lo) / vpp) * 64))]++;
-    const peak = (from, to) => {
-      let index = from;
-      for (let i = from + 1; i < to; i++) if (bins[i] > bins[index]) index = i;
-      return lo + ((index + 0.5) / 64) * vpp;
+      for (const v of values) {
+        const k = Math.min(63, Math.floor(((v - lo) / vpp) * 64));
+        bins[k]++;
+        sums[k] += v;
+      }
+    const level = (from, to, fallback) => {
+      let index = from,
+        total = 0;
+      for (let i = from; i < to; i++) {
+        total += bins[i];
+        if (bins[i] > bins[index]) index = i;
+      }
+      const distinct = bins[index] >= Math.max(3, (2.5 * total) / (to - from));
+      return distinct ? sums[index] / bins[index] : fallback;
     };
-    const vhi = vpp ? peak(32, 64) : hi,
-      vlo = vpp ? peak(0, 32) : lo;
-    const up = crossings(values, middle, true, dt),
-      down = crossings(values, middle, false, dt);
+    const vhi = vpp ? level(32, 64, hi) : hi,
+      vlo = vpp ? level(0, 32, lo) : lo;
+    const hysteresis = 0.1 * vpp;
+    const up = crossingsWithHysteresis(values, middle, true, dt, hysteresis),
+      down = crossingsWithHysteresis(values, middle, false, dt, hysteresis);
     const period = measuredPeriod ?? up[1] - up[0];
     const positiveEnd = down.find((t) => t > up[0]);
     const negativeEnd = up.find((t) => t > down[0]);

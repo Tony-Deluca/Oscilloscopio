@@ -86,7 +86,7 @@ m=await js("({fs:capture.fs, len:capture.length})");
 check('12 500 punti a 500 µs/div → 1 MSa/s', m.fs===1e6 && m.len===12500, m);
 await js("document.getElementById('s-run').click()"); await wait(100);
 for(let i=0;i<20;i++) await js("horizontalScale(1)");
-m=await js("s.time"); check('Da fermo: zoom fino a 7 scatti più veloci (2,5 µs/div)', Math.abs(m-2.5e-6)<1e-15, m);
+m=await js("s.time"); check('Da fermo: zoom fino a 7 scatti oltre la riga 500 punti a 1 MSa/s (100 ns/div, manuale p. 21)', Math.abs(m-100e-9)<1e-18, m);
 // 12. Tempo di salita: quadra 100 kHz, cavo 1 m, ET 10 ns/div
 await reset();
 await js("lab.circuit='direct'; lab.cable=1; lab.channels[1].node='none'; g.wave='SQUARE'; g.freq=1e5; g.amp=2; s.channels[0].scale=0.5; s.channels[1].on=false; s.time=10e-9; s.acq='Sample'; changed();"); await fresh(2500);
@@ -111,6 +111,22 @@ m=await js("(()=>{g.term='50 Ω'; g.offset=0; g.amp=1; chooseGenWave('ARB'); g.a
 check('Arb SINC max 6,084 Vpp, NEG RAMP 10 Vpp su 50 Ω', Math.abs(m.sinc-6.084)<0.01 && m.ramp===10, m);
 check('Offset oltre il limite → MAX VALUE e offset massimo (2 V con 1 Vpp)', m.off===2 && m.msg==='MAX VALUE', m);
 check('Ampiezza minima vincolata dall’offset (|Voff| ≤ 2·Vpp)', Math.abs(m.ampAfter-1)<1e-12, m);
+// 15. Generatore: unità sulle frecce (V senza Shift, mV con Shift), AM, burst
+await reset();
+await js("['g-ampl','g-enter-number','g-square','g-up'].forEach(id=>document.getElementById(id).click())");
+const vpp=await js("g.amp");
+await js("['g-ampl','g-enter-number','g-ramp','g-noise','g-recall','g-shift','g-down'].forEach(id=>document.getElementById(id).click())");
+m=await js("({amp:g.amp, unit:genUnit, text:document.getElementById('g-reading').textContent})");
+check('Ampl, 2, ↑ = 2 Vpp; Ampl, 450, Shift ↓ = 450 mVrms (User’s Guide pp. 20–21)', vpp===2 && Math.abs(m.amp-0.45*2*Math.SQRT2)<1e-9 && /450\.0 mVRMS/.test(m.text), {vpp,...m});
+m=await js("(()=>{g.mode='AM'; g.depth=100; g.amp=1; g.term='HIGH Z'; let hi=0, lo=0; for(let i=0;i<20000;i++){const v=Physics.source(g,i*5e-6,()=>0); hi=Math.max(hi,v); lo=Math.min(lo,v);} g.depth=0; let h0=0; for(let i=0;i<2000;i++) h0=Math.max(h0,Physics.source(g,i*5e-6,()=>0)); return {pp100:hi-lo, pp0:2*h0};})()");
+check('AM: 100 % → picco pari all’ampiezza impostata, 0 % → metà', Math.abs(m.pp100-1)<0.02 && Math.abs(m.pp0-0.5)<0.01, m);
+m=await js("(()=>{g.mode='CONT'; g.wave='SINE'; g.freq=10e6; ['g-shift','g-ramp'].forEach(id=>document.getElementById(id).click()); return {mode:g.mode, freq:g.freq, msg:genReadout};})()");
+check('Burst: portante limitata a 5 MHz con FREQ LIMIT', m.mode==='BURST' && m.freq===5e6 && m.msg==='FREQ LIMIT', m);
+m=await js("(()=>{const r=Physics.measures(Float64Array.from({length:500},(_,i)=>((i*7)%100)/100-0.5),1e-5); return {Vhi:r.Vhi, Vlo:r.Vlo};})()");
+check('Vhi/Vlo su rampa = massimo/minimo', Math.abs(m.Vhi-0.49)<1e-9 && Math.abs(m.Vlo+0.5)<1e-9, m);
+await js("document.getElementById('lab-preset').click()"); await wait(300);
+m=await js("({circuit:lab.circuit, ch2:lab.channels[1].node, term:g.term, freq:g.freq, amp:g.amp, scale:s.channels[0].scale})");
+check('Assetto esperienze: diretto su CH1, generatore e oscilloscopio di fabbrica', m.circuit==='direct' && m.ch2==='none' && m.term==='50 Ω' && m.freq===1000 && m.scale===2, m);
 // 14. Prestazioni: durata di un’acquisizione con memorie lunghe
 await reset();
 m=await js(`(()=>{const out={}; for(const L of [500,12500,125000]){ s.recordLength=L; s.time=0.0005; s.acq='Sample'; changed(); armAcquisition(now()); pending.trigger=now()+0.01; pending.triggered=true; const a=performance.now(); completeAcquisition(pending); updateMetrics(); viewSlice(); out[L]=Math.round(performance.now()-a); pending=null;} s.recordLength=500; return out;})()`);

@@ -215,7 +215,8 @@ let genField = "amp",
   genAction = null,
   genReadout = "";
 let genQueue = [],
-  calibrated = false;
+  calibrated = false,
+  menuEdited = false;
 let preferredRow = 0,
   help = null,
   undo = null,
@@ -430,13 +431,13 @@ function genItems() {
       numberItem("BURST RATE", "burstRate", 0.01, 50000, "Hz", 1),
       numberItem("BURST PHAS", "burstPhase", -360, 360, "°", 1),
       choice("BURST SRC", "burstSource", ["INT", "EXT"]),
-      numberItem("FSK FREQ", "fskFreq", 0.0001, maxFrequency(), "Hz", 10),
+      numberItem("FSK FREQ", "fskFreq", 0.01, maxFrequency(), "Hz", 10),
       numberItem("FSK RATE", "fskRate", 0.01, 50000, "Hz", 1),
       choice("FSK SRC", "fskSource", ["INT", "EXT"]),
     ],
     [
-      numberItem("START F", "startFreq", 0.0001, maxFrequency(), "Hz", 10),
-      numberItem("STOP F", "stopFreq", 0.0001, maxFrequency(), "Hz", 10),
+      numberItem("START F", "startFreq", 0.01, maxFrequency(), "Hz", 10),
+      numberItem("STOP F", "stopFreq", 0.01, maxFrequency(), "Hz", 10),
       numberItem("SWP TIME", "sweepTime", 0.001, 500, "s", 0.01),
       choice("SWP MODE", "sweepMode", ["LINEAR", "LOG"]),
     ],
@@ -494,15 +495,16 @@ function genItems() {
 }
 function maxFrequency() {
   const points = g.arbs[g.arb]?.length ?? 0;
-  return (
+  const limit =
     {
       SINE: 15e6,
       SQUARE: 15e6,
       TRIANGLE: 1e5,
       RAMP: 1e5,
       ARB: points >= 12288 ? 200e3 : points >= 8193 ? 2.5e6 : 5e6,
-    }[g.wave] ?? 15e6
-  );
+    }[g.wave] ?? 15e6;
+  // In burst la portante non supera 5 MHz (User's Guide, cap. 8).
+  return g.mode === "BURST" ? Math.min(limit, 5e6) : limit;
 }
 // Le forme arbitrarie che non usano tutta la scala del DAC hanno un'ampiezza
 // massima ridotta: la SINC arriva a 6,084 Vpp su 50 Ω (User's Guide, p. 59).
@@ -529,7 +531,7 @@ function rangeG(field) {
     modFreq: [0.01, 20000],
     fmFreq: [0.01, 10000],
     depth: [0, 120],
-    deviation: [0.0001, Math.min(g.freq, 15e6 - g.freq) || 0.0001],
+    deviation: [0.01, Math.max(0.01, Math.min(g.freq, 15e6 - g.freq))],
   }[field];
 }
 function editGen(field, value) {
@@ -556,17 +558,21 @@ function genUnits() {
       ["kHz", 1e3],
       ["Hz", 1],
     ];
+  // Le frecce confermano in V; con Shift in mV (User's Guide, pp. 20–21:
+  // 50 mVrms si ottengono con «Shift ↓»).
+  const milli = genShift ? 0.001 : 1,
+    m = genShift ? "m" : "";
   if (genField === "amp")
     return [
-      ["mVpp", 0.001],
-      ["mVrms", 0.001],
+      [m + "Vpp", milli],
+      [m + "Vrms", milli],
       ["dBm", 1],
     ];
   if (genField === "offset")
     return [
-      ["mV", 0.001],
-      ["mV", 0.001],
-      ["V", 1],
+      [m + "V", milli],
+      [m + "V", milli],
+      [m + "V", milli],
     ];
   return [
     ["%", 1],
@@ -628,12 +634,16 @@ function chooseGenWave(wave) {
     g.mode = "CONT";
     genField = wave === "DC" ? "offset" : "amp";
   }
+  const before = [g.freq, g.amp];
   editGen("freq", g.freq);
   // Cambiando funzione ampiezza e offset si adattano ai nuovi limiti.
   if (wave !== "DC") {
     g.amp = clamp(g.amp, ...rangeG("amp"));
     g.offset = clamp(g.offset, ...rangeG("offset"));
   }
+  if (g.freq !== before[0]) setGenMessage("FREQ LIMIT");
+  else if (g.amp !== before[1]) setGenMessage("AMPL LIMIT");
+  else if (genReadout === "MAX VALUE") genReadout = "";
 }
 function currentGenItem() {
   return genItems()[menuGroup][menuIndex];
@@ -685,6 +695,8 @@ function enterGen() {
     g.offset *= factor;
     if (g.term === "HIGH Z" && genUnit === "dBm") genUnit = "Vpp";
   } else g.settings[item.key] = menuValue;
+  if (!item.fn) setGenMessage("ENTERED");
+  menuEdited = false;
   menuLevel = -1;
 }
 function moveGenMenu(d) {
@@ -716,6 +728,7 @@ function genRotate(d) {
       genItems()[menuGroup].length;
   else if (menuLevel === 2) {
     const item = currentGenItem();
+    menuEdited = true;
     if (item.options) menuValue = next(item.options, menuValue, d);
     if (item.step)
       menuValue = Number(
@@ -799,6 +812,8 @@ function genKey(key, digitKey) {
     return;
   }
   if (genShift && key === "Enter") {
+    if (menuLevel >= 0) setGenMessage(menuEdited ? "NOT ENTERED" : "EXITING");
+    menuEdited = false;
     menuLevel = menuLevel < 0 ? 0 : -1;
     genShift = false;
     genEntry = null;
@@ -847,6 +862,14 @@ function genKey(key, digitKey) {
       if (["DC", "NOISE"].includes(g.wave)) chooseGenWave("SINE");
       g.mode = g.mode === m ? "CONT" : m;
       g.singleMode = false;
+      const carrier = g.freq;
+      editGen("freq", g.freq);
+      if (g.freq !== carrier) setGenMessage("FREQ LIMIT");
+      // Il campo «AM/FM» segue la modulazione attiva.
+      if (genField === "modFreq" || genField === "fmFreq")
+        genField = g.mode === "FM" ? "fmFreq" : "modFreq";
+      if (genField === "depth" || genField === "deviation")
+        genField = g.mode === "FM" ? "deviation" : "depth";
     } else chooseGenWave(key);
   }
   if (key === "Freq") {
@@ -923,7 +946,7 @@ function renderGenerator() {
     bottom.textContent =
       genUnits()
         .map(([u], i) => ["↑", "↓", "→"][i] + " " + u)
-        .join("   ") + "   ← Cancella";
+        .join("   ") + (genShift ? "" : "   Shift: mV") + "   ← Cancella";
     return;
   }
   if (genAction?.type === "arb") {
@@ -957,7 +980,33 @@ function renderGenerator() {
           : item.name + " · ENTER";
     return;
   }
-  reading.textContent = genDisplay(genField, g[genField]);
+  showWithFlashingDigit(reading, genDisplay(genField, g[genField]));
+}
+// La cifra lampeggiante è quella che la manopola modifica (User's Guide,
+// «Front-Panel Number Entry»): ← e → la spostano.
+function showWithFlashingDigit(target, text) {
+  const base = { freq: 1, modFreq: 1, fmFreq: 1, deviation: 1, amp: 0.01, offset: 0.01 }[genField];
+  const v = Math.abs(g[genField]);
+  let factor = null;
+  if (base === 1) factor = v >= 1e6 ? 1e6 : v >= 1e3 ? 1e3 : v >= 1 ? 1 : 1e-3;
+  else if (genField === "offset" || /pp$/i.test(genUnit)) factor = v >= 1 || v === 0 ? 1 : 1e-3;
+  const place = factor && Math.round(Math.log10((base * 10 ** digit) / factor));
+  const number = text.split(" ")[0];
+  const whole = number.replace(/^[+-]/, "").split(".")[0].length;
+  // Indice della cifra con quel peso, contando solo le cifre del numero.
+  const target_ = place === null || !factor ? -1 : whole - 1 - place;
+  let seen = -1,
+    at = -1;
+  for (let i = 0; i < number.length && at < 0; i++)
+    if (/\d/.test(number[i]) && ++seen === target_) at = i;
+  if (at < 0) {
+    target.textContent = text;
+    return;
+  }
+  const flash = document.createElement("span");
+  flash.className = "flash";
+  flash.textContent = text[at];
+  target.replaceChildren(text.slice(0, at), flash, text.slice(at + 1));
 }
 // Formati del display a fluorescenza del 33120A (User's Guide, pp. 19–24):
 // frequenza su 8 cifre con separatori «,» per le migliaia dopo il punto
@@ -988,8 +1037,8 @@ function genDisplay(field, v) {
       return hz(v);
     case "amp": {
       if (genUnit === "dBm") {
-        const dbm = 10 * Math.log10((v * waveRms()) ** 2 / (50 * 0.001));
-        return (dbm >= 0 ? "+" : "-") + Math.abs(dbm).toFixed(2) + " dBm";
+        const dbm = Number((10 * Math.log10((v * waveRms()) ** 2 / (50 * 0.001))).toFixed(2));
+        return (dbm < 0 ? "-" : "+") + Math.abs(dbm).toFixed(2) + " dBm";
       }
       const rms = /rms/i.test(genUnit);
       return level(rms ? v * waveRms() : v, rms ? "RMS" : "PP");
@@ -2258,7 +2307,10 @@ function horizontalScale(d) {
   if (s.horizontal === "Window" || s.horizontal === "Window Zoom")
     s.zoom = scaleStep(choices, s.zoom, -d);
   else if (!s.running && capture && !capture.roll) {
-    const i = timeSteps.indexOf(scaleStep(timeSteps, capture.time, 0));
+    // Il fattore si conta dalla riga «500 punti» della tabella 5-2 con la
+    // stessa frequenza di campionamento (manuale, p. 21, figura 5-11).
+    const base = capture.equivalent ? capture.time : 25 / capture.fs;
+    const i = timeSteps.indexOf(scaleStep(timeSteps, base, 0));
     const fastest = timeSteps[Math.max(0, i - 7)];
     s.time = scaleStep(choices.filter((t) => t >= fastest), s.time, -d);
   } else s.time = scaleStep(choices, s.time, -d);
@@ -2915,7 +2967,10 @@ function completeAcquisition(p) {
       : null;
     const hiRes = averaging && length > 500;
     const adcPerSample = Math.max(1, dt * REALTIME_MAX);
-    const sub = peak || hiRes ? Math.min(12, Math.ceil(adcPerSample)) : 1;
+    // Peak Detect e Average con memoria lunga usano più conversioni per
+    // intervallo, entro un budget di calcolo per acquisizione.
+    const budget = Math.max(12, Math.floor(2e5 / length));
+    const sub = peak || hiRes ? Math.min(budget, Math.ceil(adcPerSample)) : 1;
     for (let i = 0; i < length; i++) {
       const t = p.trigger + start + i * dt;
       const pair = fe(t);
@@ -3780,7 +3835,8 @@ function setupLab() {
     if (cableInput.validity.valid && Number.isFinite(cableInput.valueAsNumber)) {
       lab.cable = cableInput.valueAsNumber;
       changed();
-    }
+    } else if (cableInput.value !== "")
+      say("Lunghezza dei cavi fra 0 e 5 m: oltre, il modello a capacità concentrata non vale più");
   });
   const jack = (id, label, target) => {
     const b = document.createElement("button");
@@ -3824,6 +3880,18 @@ function setupLab() {
       e.target.value = Number((lab[key] / factor).toPrecision(12));
     });
   }
+  $("lab-preset").onclick = () => {
+    $("reset-lab").click();
+    g = factoryGen(g);
+    genField = "freq";
+    lab.circuit = "direct";
+    lab.channels[1].node = "none";
+    factoryScope();
+    s.menu = "CH1";
+    $("circuit").value = lab.circuit;
+    changed();
+    say("Assetto delle esperienze: generatore su CH1, strumenti alle impostazioni di fabbrica");
+  };
   $("reset-lab").onclick = () => {
     stopProgram();
     g = genDefault();

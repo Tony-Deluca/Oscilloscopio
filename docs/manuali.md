@@ -424,8 +424,9 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Memoria e trigger | buffer circolare: prima si riempie il pre-trigger, poi si attende l’evento sul segnale analogico, poi il post-trigger; a 100 ms/div ogni traccia richiede 2 s | dispense, «Gestione della memoria circolare e trigger»; manuale, p. 41 |
 | Clock di campionamento | libero rispetto al trigger, con lo sfasamento corretto; in Sample i segnali sottocampionati vanno in aliasing | dispense, campionamento e Nyquist |
 | Punti a schermo | 500 punti elaborati, 25 per divisione a schermo (250 col menu, 300 senza); misure e FFT sui 500 punti | manuale, pp. 13 e 21; manuale di programmazione, :ACQuire:POINt |
-| Esplorazione del record | da fermo, fino a sette scatti di Time/div più veloci; la barra della memoria mostra la parte visibile | manuale, p. 21 |
+| Esplorazione del record | da fermo, fino a sette scatti più veloci della Time/div che con 500 punti dà la stessa frequenza di campionamento; la barra della memoria mostra la parte visibile | manuale, p. 21 e figura 5-11 |
 | Peak Detect | minimo e massimo su ogni intervallo, da 500 ns/div | manuale, p. 41 |
+| Misure automatiche | Vhi e Vlo come livello più frequente di ciascuna metà dell'istogramma, oppure massimo e minimo se manca un picco netto (rampe, triangoli); passaggi al 50 % con isteresi del 10 % | manuale, pp. 61–62 |
 | Average | media di 2–256 acquisizioni con 500 punti; con memorie più lunghe media sulle conversioni di ogni intervallo | manuale, p. 42 |
 | Tempo equivalente | asincrono: a ogni trigger i campioni a 100 MSa/s, con sfasamento casuale, riempiono le celle del record | dispense, «Campionamento in tempo equivalente asincrono» |
 | Roll | in Roll, e in Auto da 250 ms/div in su, la traccia scorre senza trigger | manuale, pp. 19 e 26 |
@@ -433,11 +434,12 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Stadio d’ingresso | 1 MΩ ∥ 22 pF; banda del primo ordine a 150 MHz (2,3 ns) o 20 MHz; AC con polo a 10 Hz applicato alla forma d’onda | manuale, cap. 8 |
 | Cavi | RG-58 da circa 101 pF/m, lunghezza regolabile nel pannello del banco (1 m di partenza) | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
 | Sonde ×10 | 10 MΩ ∥ 13 pF alla punta | dispense («10–15 pF») |
-| Generatore | stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia; vincoli \|Voffset\| + Vpp/2 ≤ Vmax e \|Voffset\| ≤ 2·Vpp con «MAX VALUE»/«MIN VALUE»; ampiezza massima ridotta per le arbitrarie (SINC 6,084 Vpp su 50 Ω) | User’s Guide, pp. 19–24, 59–62 e 123 |
+| Generatore | frecce di unità in V (Vpp, Vrms, dBm) e in mV con Shift; AM con uscita pari a metà dell'ampiezza a 0 % e all'ampiezza impostata a 100 %; portante del burst fino a 5 MHz; messaggi ENTERED, EXITING, NOT ENTERED, FREQ LIMIT e AMPL LIMIT; cifra lampeggiante della manopola; stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia; vincoli \|Voffset\| + Vpp/2 ≤ Vmax e \|Voffset\| ≤ 2·Vpp con «MAX VALUE»/«MIN VALUE»; ampiezza massima ridotta per le arbitrarie (SINC 6,084 Vpp su 50 Ω) | User’s Guide, pp. 19–24, 59–62 e 123 |
 
 **Scelte non documentate dal costruttore**, stimate e dichiarate come tali:
 - il rumore d’ingresso: 0,2 mV più 0,02 div efficaci;
 - il tempo morto fra due acquisizioni: 40 ms più 0,4 µs per punto;
+- in Peak Detect le conversioni per intervallo sono limitate da un budget di calcolo (circa 2·10⁵ per canale e acquisizione), quindi a velocità molto lente un impulso più stretto dell'intervallo diviso per quel numero può sfuggire;
 - il timeout del trigger automatico: 150 ms o la durata del record;
 - la sonda ×100 trattata come la ×10;
 - il fronte del generatore considerato ideale (la specifica dice solo «< 20 ns»).
