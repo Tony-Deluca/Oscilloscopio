@@ -504,12 +504,27 @@ function maxFrequency() {
     }[g.wave] ?? 15e6
   );
 }
+// Le forme arbitrarie che non usano tutta la scala del DAC hanno un'ampiezza
+// massima ridotta: la SINC arriva a 6,084 Vpp su 50 Ω (User's Guide, p. 59).
+function arbAmplitudeFactor() {
+  if (g.wave !== "ARB") return 1;
+  const points = g.arbs[g.arb] ?? Physics.factoryArbs[g.arb];
+  return Math.min(1, (Math.max(...points) - Math.min(...points)) / 2);
+}
+// Vincoli fra ampiezza e offset: |Voffset| + Vpp/2 ≤ Vmax e |Voffset| ≤ 2·Vpp,
+// con Vmax = 5 V su 50 Ω e 10 V ad alta impedenza (User's Guide, pp. 60–62).
 function rangeG(field) {
   const half = g.term === "HIGH Z" ? 10 : 5;
+  const offset = Math.abs(g.offset);
+  const offsetLimit =
+    g.wave === "DC" ? half : Math.min(half - g.amp / 2, 2 * g.amp);
   return {
     freq: [0.0001, maxFrequency()],
-    amp: [g.term === "HIGH Z" ? 0.1 : 0.05, 2 * (half - Math.abs(g.offset))],
-    offset: [-half + g.amp / 2, half - g.amp / 2],
+    amp: [
+      Math.max(g.term === "HIGH Z" ? 0.1 : 0.05, offset / 2),
+      Math.min(2 * half * arbAmplitudeFactor(), 2 * (half - offset)),
+    ],
+    offset: [-offsetLimit, offsetLimit],
     duty: g.freq <= 5e6 ? [20, 80] : [40, 60],
     modFreq: [0.01, 20000],
     fmFreq: [0.01, 10000],
@@ -523,10 +538,9 @@ function editGen(field, value) {
     return;
   }
   const [lo, hi] = rangeG(field);
-  if (value < lo || value > hi) {
-    genQueue.push("DATA OUT OF RANGE");
-    if (genQueue.length > 20) genQueue.shift();
-  }
+  // Dal pannello lo strumento corregge il valore e mostra MAX o MIN VALUE.
+  if (value > hi * (1 + 1e-12)) setGenMessage("MAX VALUE");
+  else if (value < lo * (1 - 1e-12) - 1e-15) setGenMessage("MIN VALUE");
   g[field] = Number(clamp(value, lo, hi).toPrecision(10));
   if (field === "freq") {
     g.duty = clamp(g.duty, ...rangeG("duty"));
@@ -615,6 +629,11 @@ function chooseGenWave(wave) {
     genField = wave === "DC" ? "offset" : "amp";
   }
   editGen("freq", g.freq);
+  // Cambiando funzione ampiezza e offset si adattano ai nuovi limiti.
+  if (wave !== "DC") {
+    g.amp = clamp(g.amp, ...rangeG("amp"));
+    g.offset = clamp(g.offset, ...rangeG("offset"));
+  }
 }
 function currentGenItem() {
   return genItems()[menuGroup][menuIndex];
@@ -2842,7 +2861,10 @@ function serviceAcquisition(t) {
     if (t - p.from > 1) p.from = t - 1;
     // Finestra di ricerca: abbastanza periodi per trovare un fronte, ma con
     // un passo fine rispetto al periodo (90 punti per periodo).
-    const to = Math.max(p.from, t) + Math.min(Math.max(40 * period, 1e-6), 0.02);
+    const searchSpan = Math.min(Math.max(40 * period, 1e-6), 0.02);
+    // Il segnale futuro non è ancora arrivato: si cerca solo fino a «adesso».
+    if (p.from > t + searchSpan) return false;
+    const to = Math.max(p.from, t) + searchSpan;
     const fe = analogWindow(p.from - p.duration, to + p.duration);
     const found = findTrigger(fe, p.from, to, period);
     if (found.time !== null) {
@@ -3037,7 +3059,11 @@ function processedPoints(values) {
   if (!capture) return new Float64Array();
   if (values.length <= PROCESSED_POINTS) return values;
   const step = values.length / PROCESSED_POINTS;
-  return Float64Array.from({ length: PROCESSED_POINTS }, (_, i) => values[Math.floor(i * step)]);
+  return Float64Array.from({ length: PROCESSED_POINTS }, (_, i) => {
+    const x = i * step,
+      k = Math.floor(x);
+    return mix(values[k], values[Math.min(k + 1, values.length - 1)], x - k);
+  });
 }
 const processedDt = () =>
   capture ? (capture.length * capture.dt) / Math.min(capture.length, PROCESSED_POINTS) : 0;
@@ -3148,7 +3174,7 @@ function updateMetrics() {
     }
     const finite = v.filter(Number.isFinite);
     const result = Physics.measures(finite, dt);
-    if (capture.extrema) {
+    if (capture.extrema && !measureT) {
       const [lo, hi] = capture.extrema[j];
       result.Vmax = Math.max(...hi);
       result.Vmin = Math.min(...lo);

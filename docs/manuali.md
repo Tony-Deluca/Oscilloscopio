@@ -433,7 +433,7 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Stadio d’ingresso | 1 MΩ ∥ 22 pF; banda del primo ordine a 150 MHz (2,3 ns) o 20 MHz; AC con polo a 10 Hz applicato alla forma d’onda | manuale, cap. 8 |
 | Cavi | RG-58 da circa 101 pF/m, lunghezza regolabile nel pannello del banco (1 m di partenza) | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
 | Sonde ×10 | 10 MΩ ∥ 13 pF alla punta | dispense («10–15 pF») |
-| Generatore | stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia | User’s Guide, pp. 19–24 e 123 |
+| Generatore | stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia; vincoli \|Voffset\| + Vpp/2 ≤ Vmax e \|Voffset\| ≤ 2·Vpp con «MAX VALUE»/«MIN VALUE»; ampiezza massima ridotta per le arbitrarie (SINC 6,084 Vpp su 50 Ω) | User’s Guide, pp. 19–24, 59–62 e 123 |
 
 **Scelte non documentate dal costruttore**, stimate e dichiarate come tali:
 - il rumore d’ingresso: 0,2 mV più 0,02 div efficaci;
