@@ -918,6 +918,11 @@ function renderGenerator() {
   $("g-power").setAttribute("aria-pressed", g.on);
   $("g-shift").classList.toggle("active", genShift);
   $("g-shift").setAttribute("aria-pressed", genShift);
+  // Stato del pannello per i colori: legende blu con Shift, cifre verdi in
+  // Enter Number.
+  const panel = $("g-power").closest(".generator");
+  panel.classList.toggle("shift", g.on && genShift);
+  panel.classList.toggle("entry", g.on && genEntry !== null);
   const status = $("g-status"),
     reading = $("g-reading"),
     bottom = $("g-bottom");
@@ -3584,6 +3589,7 @@ function renderScope() {
     b.setAttribute("aria-pressed", s.on && s.channels[i].on);
   }
   $("s-run").classList.toggle("active", s.on && s.running);
+  $("s-run").classList.toggle("stopped", s.on && !s.running);
   $("s-math").classList.toggle("active", s.on && s.math);
   $("s-help").classList.toggle("active", help !== null);
   $("csv").disabled = !capture;
@@ -3642,9 +3648,11 @@ function renderScope() {
           ?.focus({ preventScroll: true });
     }
   }
-  for (let i = 0; i < 5; i++)
+  for (let i = 0; i < 5; i++) {
     $("f" + (i + 1)).disabled =
       !s.on || !s.menuOn || !cachedRows?.[i]?.action || help !== null;
+    $("f" + (i + 1)).classList.toggle("selected", s.on && s.menuOn && preferredRow === i);
+  }
   traceCanvas();
 }
 const nodeNames = {
@@ -3707,14 +3715,14 @@ function schematic() {
     w = c.canvas.width,
     h = c.canvas.height;
   c.clearRect(0, 0, w, h);
-  c.fillStyle = "#eff4ee";
+  c.fillStyle = "#efe5cc";
   c.fillRect(0, 0, w, h);
-  c.fillStyle = "#a2b8ab";
+  c.fillStyle = "#c8b68f";
   for (let x = 20; x < w; x += 20)
     for (let y = 20; y < h; y += 20) c.fillRect(x, y, 1.5, 1.5);
   c.lineWidth = 3;
-  c.strokeStyle = "#305847";
-  c.fillStyle = "#305847";
+  c.strokeStyle = "#3a2a1f";
+  c.fillStyle = "#3a2a1f";
   c.font = "19px monospace";
   const line = (...points) => {
     c.beginPath();
@@ -3841,10 +3849,6 @@ function renderLab() {
       return div;
     }),
   );
-  $("response-hint").textContent =
-    g.mode === "CONT" && g.wave === "SINE"
-      ? "Risposta sinusoidale OUT/IN alla frequenza impostata."
-      : "Risposta teorica del circuito alla frequenza nominale.";
 }
 function setupLab() {
   const patch = $("patch");
@@ -4063,9 +4067,6 @@ g.arbs = stored("arbs", {});
 setupGenerator();
 setupScope();
 setupLab();
-document.querySelector('a[href="#guide"]').addEventListener("click", () => {
-  $("guide").open = true;
-});
 new ResizeObserver(traceCanvas).observe(canvas);
 render();
 requestAnimationFrame(tick);
