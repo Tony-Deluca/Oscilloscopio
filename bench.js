@@ -1472,6 +1472,10 @@ function scopeRows() {
             label,
             s.acq === key ? (key === "Average" ? "×" + s.avg : "●") : "",
             () => {
+              // Già in Average, ogni pressione di F3 passa al numero di medie
+              // successivo; VARIABLE lo regola nei due versi.
+              if (key === "Average" && s.acq === "Average")
+                s.avg = next([2, 4, 8, 16, 32, 64, 128, 256], s.avg);
               s.acq = key;
             },
             key === "Average"
