@@ -2967,11 +2967,40 @@ function findTrigger(fe, from, to, period) {
       })
       .filter(Number.isFinite);
   }
-  const interval = edges[1] - edges[0];
+  // L'istante del passaggio si affina sul segnale continuo: i punti della
+  // ricerca bastano a trovare il fronte, ma a 1 Hz distano decine di µs.
+  const refine = (time, rising) =>
+    refineCrossing((t) => triggerSourceAt(fe, t), time, from, dt, values, rising);
+  const interval =
+    edges.length > 1 ? refine(edges[1], r) - refine(edges[0], r) : NaN;
+  const time = candidates[0];
   return {
-    time: candidates[0] ?? null,
+    time:
+      time === undefined
+        ? null
+        : refine(time, s.trigType === "Pulse" ? !r : r),
     hz: Number.isFinite(interval) && interval > 0 ? 1 / interval : NaN,
   };
+}
+// Bisezione fra i due punti di ricerca che racchiudono il passaggio per il
+// livello. Lo scarto fra segnale filtrato (accoppiamento AC, reiezioni) e
+// segnale continuo si prende lineare sul passo.
+function refineCrossing(signal, time, from, dt, values, rising) {
+  const i = clamp(Math.floor((time - from) / dt), 0, values.length - 2);
+  const start = from + i * dt;
+  const shiftA = values[i] - signal(start),
+    shiftB = values[i + 1] - signal(start + dt);
+  const above = (t) =>
+    signal(t) + mix(shiftA, shiftB, (t - start) / dt) >= s.level;
+  if (above(start) === rising || above(start + dt) !== rising) return time;
+  let a = start,
+    b = start + dt;
+  for (let k = 0; k < 48 && b - a > 1e-12; k++) {
+    const m = (a + b) / 2;
+    if (above(m) === rising) b = m;
+    else a = m;
+  }
+  return (a + b) / 2;
 }
 
 const isRoll = () =>

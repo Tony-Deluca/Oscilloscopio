@@ -74,9 +74,9 @@ Il comportamento degli strumenti è ricavato dai manuali ufficiali e verificato 
 - **Fisica del banco** (`physics.js`):
   - circuito RC caricato dagli ingressi dell'oscilloscopio (1 MΩ ∥ 22 pF) e dalle sonde;
   - cavo del generatore come linea adattata a 50 Ω, che introduce solo un ritardo; cavi verso l'oscilloscopio come capacità;
-  - fronti finiti dell'onda quadra;
+  - fronti finiti dell'onda quadra, calcolati con passi fitti vicino ai fronti, così restano nitidi anche a frequenze molto basse;
   - stadio d'ingresso con accoppiamento AC a 10 Hz e banda di 150 MHz, o 20 MHz con BW Limit.
-- **Verifiche.** Il modello fisico è stato ricalcolato da zero con NumPy e SciPy, con 39 confronti su 39 in accordo ([docs/verifica-fisica.md](docs/verifica-fisica.md)). Altri 38 controlli confrontano il simulatore con i valori dei manuali.
+- **Verifiche.** Il modello fisico è stato ricalcolato da zero con NumPy e SciPy, con 39 confronti su 39 in accordo ([docs/verifica-fisica.md](docs/verifica-fisica.md)). Altri 39 controlli confrontano il simulatore con i valori dei manuali.
 
 ## Limiti
 
@@ -123,7 +123,7 @@ Gli altri test richiedono Node.js 22.4 o successivo e un Chrome di prova avviato
 | --- | --- |
 | `node tests/browser.mjs` | Il pannello completo: menu, trigger, cursori, FFT, memoria, esportazioni, versione mobile |
 | `node tests/standalone-browser.mjs` | Lo stesso su `banco-rc.html`, senza file esterni |
-| `node tests/conformita.mjs` | 38 controlli contro i manuali: tabella 5-2 completa, ADC, misure, FFT, cursori, trigger, sonde, limiti del generatore, robustezza |
+| `node tests/conformita.mjs` | 39 controlli contro i manuali: tabella 5-2 completa, ADC, misure, FFT, cursori, trigger, sonde, limiti del generatore, robustezza |
 | `node tests/fuzz.mjs [seme] [azioni]` | Azioni casuali riproducibili su tasti, manopole e campi, controllando che non compaiano eccezioni o valori non validi |
 
 La verifica indipendente della fisica richiede Python con NumPy e SciPy:
