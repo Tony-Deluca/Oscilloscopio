@@ -2151,6 +2151,9 @@ let cachedRows,
   noticeTimer,
   runningProgram,
   goCount = [0, 0];
+// Lettura della posizione verticale mentre si gira POSITION (manuale,
+// figura 5-2): resta a schermo per qualche secondo.
+let positionReadout = null;
 let lastFrame = 0,
   overlay = [],
   changeRevision = 0;
@@ -4427,7 +4430,10 @@ function setupScope() {
         turn(
           "position-" + i,
           "Position",
-          (d) => channelOffset(s.channels[i], d),
+          (d) => {
+            channelOffset(s.channels[i], d);
+            positionReadout = { channel: i, until: performance.now() + 3000 };
+          },
           false,
           false,
         ),
@@ -5263,6 +5269,29 @@ function traceCanvas() {
       }
     ctx.stroke();
     ctx.setLineDash([]);
+    // Assi centrali X e Y con le tacche ogni 1/5 di divisione, come sul
+    // reticolo dello strumento: riferimento per lo zero e le letture a occhio.
+    const cx = Math.round(x + gw / 2) + 0.5,
+      cy = Math.round(y + gh / 2) + 0.5;
+    ctx.strokeStyle = "#6c8b91";
+    ctx.beginPath();
+    ctx.moveTo(x, cy);
+    ctx.lineTo(x + gw, cy);
+    ctx.moveTo(cx, y);
+    ctx.lineTo(cx, y + gh);
+    for (let k = 1; k < cols * 5; k++) {
+      const xx = Math.round(x + (gw * k) / (cols * 5)) + 0.5,
+        len = k % 5 ? 2.5 : 4.5;
+      ctx.moveTo(xx, cy - len);
+      ctx.lineTo(xx, cy + len);
+    }
+    for (let k = 1; k < 40; k++) {
+      const yy = Math.round(y + (gh * k) / 40) + 0.5,
+        len = k % 5 ? 2.5 : 4.5;
+      ctx.moveTo(cx - len, yy);
+      ctx.lineTo(cx + len, yy);
+    }
+    ctx.stroke();
   }
   ctx.font = "9px monospace";
   if (s.horizontal === "Window") {
@@ -5440,22 +5469,38 @@ function traceCanvas() {
     }
     ctx.fillStyle = "#b5ed91";
     ctx.fillText("T", clamp(tx(0), x, x + gw - 4) - 2, y + 7);
-    s.channels.forEach((c, j) => {
-      if (c.on) {
-        ctx.fillStyle = palette[j];
-        ctx.fillText(
-          j + 1 + "›",
-          1,
-          clamp(vy(0, c.scale, c.pos) + 3, y + 8, y + gh),
-        );
-      }
+    // Indicatore dello zero di ogni canale sul bordo sinistro.
+    [1, 0].forEach((j) => {
+      const c = s.channels[j];
+      if (!c.on) return;
+      const zy = clamp(vy(0, c.scale, c.pos), y + 5, y + gh - 5);
+      ctx.fillStyle = palette[j];
+      ctx.beginPath();
+      ctx.moveTo(0, zy - 5);
+      ctx.lineTo(8, zy - 5);
+      ctx.lineTo(12, zy);
+      ctx.lineTo(8, zy + 5);
+      ctx.lineTo(0, zy + 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#10202a";
+      ctx.font = "bold 8px monospace";
+      ctx.fillText(String(j + 1), 2, zy + 3);
+      ctx.font = "9px monospace";
     });
     ctx.fillStyle = "#9cb8b5";
-    ctx.fillText(
-      si(s.pos, "s") + "  ·  " + si(visibleTime(), "s") + "/div",
-      x,
-      h - 3,
-    );
+    const timeText = si(s.pos, "s") + "  ·  " + si(visibleTime(), "s") + "/div";
+    ctx.fillText(timeText, x, h - 3);
+    if (positionReadout) {
+      const c = s.channels[positionReadout.channel];
+      const v = c.pos * c.probe;
+      ctx.fillStyle = palette[positionReadout.channel];
+      ctx.fillText(
+        "CH" + (positionReadout.channel + 1) + " Position " + (v > 0 ? "+" : "") + si(v, "V"),
+        x + ctx.measureText(timeText).width + 18,
+        h - 3,
+      );
+    }
   }
 }
 
@@ -5976,6 +6021,10 @@ function render() {
 }
 let shownStatus = "";
 function tick(timestamp) {
+  if (positionReadout && performance.now() > positionReadout.until) {
+    positionReadout = null;
+    renderScope();
+  }
   if (s.on && s.running) {
     const t = now();
     let fresh = false;
