@@ -101,8 +101,9 @@ m=await js("s.time"); check('Da fermo: zoom fino a 7 scatti oltre la riga 500 pu
 await reset();
 await js("lab.circuit='direct'; lab.cable=1; lab.channels[1].node='none'; g.wave='SQUARE'; g.freq=1e5; g.amp=2; s.channels[0].scale=0.5; s.channels[1].on=false; s.time=10e-9; s.acq='Sample'; changed();"); await fresh(2500);
 m=await js("({rise:metricCache[0].Risetime, et:capture.equivalent, filled:capture.values[0].filter(Number.isFinite).length})");
-const tau=50*(22e-12+2*101e-12);
-check('Tempo di salita misurato ≈ 2,2·50 Ω·C (1 m: 13,5 ns)', Math.abs(m.rise-2.2*50*(22e-12+101e-12))<2e-9, {...m, atteso:2.2*50*(22e-12+101e-12)});
+// Cavo adattato: conta il fronte del generatore (20 ns), non la lunghezza del cavo
+const atteso=2.2*Math.hypot(20e-9/2.2,50*22e-12,1/(2*Math.PI*150e6));
+check('Tempo di salita ≈ fronte del generatore (20 ns) con cavo adattato', Math.abs(m.rise-atteso)<2e-9, {...m, atteso});
 // 13. Generatore: limiti del costruttore
 await reset();
 m=await js(`(()=>{const out={};

@@ -19,7 +19,8 @@ G_SCOPE, C_SCOPE, C_CABLE = 1e-6, 22e-12, 101e-12  # 1 MΩ, 22 pF, RG-58 per met
 L_CABLE = 1.0
 
 # 1. Rete RC caricata: modello nodale scritto da zero
-C_IN = C_SCOPE + C_CABLE * L_CABLE + C_CABLE * L_CABLE   # CH1 col suo cavo + cavo del generatore
+C_IN = C_SCOPE + C_CABLE * L_CABLE   # CH1 col suo cavo; il cavo del generatore è adattato
+TAU_D = L_CABLE / (0.66 * 299792458)  # ritardo del cavo del generatore
 C_OUT = C + C_SCOPE + C_CABLE * L_CABLE                  # C + CH2 col suo cavo
 G_IN = G_OUT = G_SCOPE
 row("Capacità al nodo IN (pF)", js["loads"]["in"]["cap"] * 1e12, C_IN * 1e12,
@@ -31,7 +32,7 @@ A = np.array([[-(1 / RS + G_IN + 1 / R) / C_IN, (1 / R) / C_IN],
 B = np.array([[1 / (RS * C_IN)], [0.0]])
 Cm, Dm = np.eye(2), np.zeros((2, 1))
 def H(f):
-    return np.linalg.solve(2j * np.pi * f * np.eye(2) - A, B).ravel()
+    return np.linalg.solve(2j * np.pi * f * np.eye(2) - A, B).ravel() * np.exp(-2j * np.pi * f * TAU_D)
 err = 0
 for item in js["transfer"]:
     ref = H(item["f"]); sim = np.array([complex(*item["h"][0]), complex(*item["h"][1])])
@@ -49,14 +50,15 @@ row("Fase OUT−IN a 870 Hz (°)", np.degrees(js["response870"]["phase"]), np.de
 # 2. Quadra in regime periodico: scipy.signal.lsim su molti periodi
 sysm = signal.StateSpace(A, B, Cm, Dm)
 for item in js["square"]:
-    f = item["f"]; T = 1 / f; n = 20000; periods = 30
+    f = item["f"]; T = 1 / f
+    n, periods = (20000, 30) if f >= 1000 else (200000, 8)  # passo del riferimento ≤ 50 ns
     t = np.arange(periods * n) * T / n
-    u = np.where((t * f) % 1 < 0.5, 1.0, -1.0)
-    _, y, _ = signal.lsim(sysm, u, t, interp=False)
+    u = np.where(((t - TAU_D) * f) % 1 < 0.5, 1.0, -1.0)
+    _, y, _ = signal.lsim(sysm, signal.lsim(signal.TransferFunction([1], [20e-9 / 2.2, 1]), u, t, interp=False)[1], t, interp=False)
     last = y[-n:]; tt = np.array(item["t"]); idx = np.round(tt / T * n).astype(int) % n
     sim = np.array(item["v"]); ph = (tt / T) % 0.5; keep = (ph > 4 / n) & (ph < 0.5 - 4 / n)  # esclusi i campioni sui fronti
     e = np.max(np.abs(sim - last[idx])[keep])
-    row(f"Quadra {f:g} Hz, nodi IN/OUT: scarto massimo (V)", e, 0, e < 5e-3, "lsim, 30 periodi")
+    row(f"Quadra {f:g} Hz, nodi IN/OUT: scarto massimo (V)", e, 0, e < 5e-3, "scipy.signal.lsim")
 
 # 3. Stadio d'ingresso: passa-alto 10 Hz e passa-basso del primo ordine
 e = 0
@@ -94,15 +96,16 @@ def line(f, length, loss=True):
     Ach, Bch, Cch, Dch = np.cosh(gl), Z0 * np.sinh(gl), np.sinh(gl) / Z0, np.cosh(gl)
     z = ZL(f)
     return 1 / (Ach + Bch / z + RS * (Cch + Dch / z))
+edge = lambda f: 1 / (1 + 2j * np.pi * f * 20e-9 / 2.2)  # fronte della quadra del generatore
 for item in js["cable"]:
-    length = item["len"]; cin = C_SCOPE + C_CABLE * length
-    lumped = lambda f: 1 / (1 + 50 * 2j * np.pi * f * cin) * lp150(f)
-    tline = lambda f: line(f, length) * lp150(f)
-    r_l, r_t = rise_from(lumped), rise_from(tline)
+    length = item["len"]
+    tline_sq = lambda f: line(f, length) * edge(f) * lp150(f)
+    r_t = rise_from(tline_sq)
     p_t = abs(line(15e6, length) * lp150(15e6))
-    row(f"Cavo {length:g} m: tempo di salita (ns) simulatore / concentrato / linea", item["rise"] * 1e9,
-        f"{r_l*1e9:.1f} / {r_t*1e9:.1f}", abs(item["rise"] - r_l) < 1.5e-9,
-        f"|H(15 MHz)| simulatore {item['peak15']:.3f} V di picco su 1 V, linea {p_t:.3f}")
+    row(f"Cavo {length:g} m: tempo di salita (ns), simulatore / linea di trasmissione", item["rise"] * 1e9, r_t * 1e9,
+        abs(item["rise"] - r_t) < 1.0e-9, "")
+    row(f"Cavo {length:g} m: |H| a 15 MHz, simulatore / linea di trasmissione", item["peak15"], p_t,
+        abs(item["peak15"] - p_t) < 0.02, "sinusoide, senza filtro sul fronte")
 
 # 5. Spettro: numpy.fft con finestre simmetriche di scipy e guadagno coerente
 wins = {"Rectangular": lambda n: np.ones(n), "Hanning": lambda n: windows.hann(n, sym=True),

@@ -410,7 +410,7 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Incertezza dei cursori V (passo otto): «3% della lettura + 5% della divisione + 0,08 mV» | Il manuale indica **±(3% × lettura + 0,05 div × V/div + 0,8 mV)**. Il termine costante è **0,8 mV**, non 0,08 mV |
 | Incertezza del periodo (passo nove): «0,1% del valore letto» | L’accuratezza della base dei tempi è **0,01%**. In ogni caso domina il passo di campionamento, come notato nel passo dieci |
 | Polo dell’accoppiamento AC a circa 7 Hz (passo sedici) | La banda in AC parte da **10 Hz (−3 dB)** |
-| Tempo di salita misurato 23,4 ns (passo diciotto) | La specifica è **< 2,3 ns** per l’oscilloscopio; il generatore ha fronti **< 20 ns**. Il valore misurato è quindi limitato soprattutto dal generatore e dal cavo |
+| Tempo di salita misurato 23,4 ns (passo diciotto) | La specifica è **< 2,3 ns** per l’oscilloscopio; il generatore ha fronti **< 20 ns**. Un cavo coassiale da 50 Ω pilotato dal generatore adattato introduce solo un ritardo, quindi il valore misurato dipende soprattutto dal fronte del generatore (vedi [verifica-fisica.md](verifica-fisica.md)) |
 | FFT in dB (passi dodici e tredici) | **0 dB = 1 Vrms**. Una sinusoide da 1 V di picco dovrebbe leggere circa −3 dB. Il manuale non spiega i −15 dB letti |
 | Massima frequenza del generatore 15 MHz (passo diciannove) | Confermata per sinusoide e quadra; triangolo e rampa arrivano solo a 100 kHz |
 | Terminazione High Z (passo tre) | All’accensione il 33120A torna sempre a **50 Ω** |
@@ -433,7 +433,7 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 | Roll | in Roll, e in Auto da 250 ms/div in su, la traccia scorre senza trigger | manuale, pp. 19 e 26 |
 | FFT | 500 punti, 0 dB = 1 Vrms, 20/10/5/2/1 dB/div (F5, oppure VOLTS/DIV con MATH selezionato), posizione con VARIABLE, cursori con sorgente MATH (f1, f2, Div, M1, M2) | manuale, pp. 22–24; resoconto, passo dodici |
 | Stadio d’ingresso | 1 MΩ ∥ 22 pF; banda del primo ordine a 150 MHz (2,3 ns) o 20 MHz; AC con polo a 10 Hz applicato alla forma d’onda | manuale, cap. 8 |
-| Cavi | RG-58 da circa 101 pF/m; di partenza 1 m, la lunghezza standard dei cavi BNC da banco; modificabile da 0 a 5 m nel pannello del banco («Cavi coassiali (m)») | catalogo RG-58 C/U; dispense, impedenza d’ingresso |
+| Cavi | RG-58 (50 Ω, circa 5 ns/m, 101 pF/m), di partenza 1 m e modificabile da 0 a 5 m. Il cavo del generatore è una linea adattata: solo ritardo, nessuna capacità al nodo. I cavi verso l’oscilloscopio sono tronchi aperti, approssimati dalla loro capacità (valido fino a circa 20 MHz per 1–2 m) | teoria delle linee di trasmissione; verifica con SciPy |
 | Sonde ×10 | 10 MΩ ∥ 13 pF alla punta | dispense («10–15 pF») |
 | Generatore | frecce di unità in V (Vpp, Vrms, dBm) e in mV con Shift; AM con uscita pari a metà dell'ampiezza a 0 % e all'ampiezza impostata a 100 %; portante del burst fino a 5 MHz; messaggi ENTERED, EXITING, NOT ENTERED, FREQ LIMIT e AMPL LIMIT; cifra lampeggiante della manopola; stato all’accensione di p. 123; DC tenendo premuto Offset per più di 2 s; frequenze AM e FM separate; display con separatori delle migliaia; vincoli \|Voffset\| + Vpp/2 ≤ Vmax e \|Voffset\| ≤ 2·Vpp con «MAX VALUE»/«MIN VALUE»; ampiezza massima ridotta per le arbitrarie (SINC 6,084 Vpp su 50 Ω) | User’s Guide, pp. 19–24, 59–62 e 123 |
 
@@ -443,6 +443,6 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 - in Peak Detect le conversioni per intervallo sono limitate da un budget di calcolo (circa 2·10⁵ per canale e acquisizione), quindi a velocità molto lente un impulso più stretto dell'intervallo diviso per quel numero può sfuggire;
 - il timeout del trigger automatico: 150 ms o la durata del record;
 - la sonda ×100 trattata come la ×10;
-- il fronte del generatore considerato ideale (la specifica dice solo «< 20 ns»).
+- il fronte dell’onda quadra del generatore: 20 ns di partenza, il limite dichiarato, modificabile da 1 a 40 ns nel pannello del banco; triangolo, rampa e forme arbitrarie con i 40 ns tipici; la sinusoide senza filtro, piatta fino a 15 MHz come da specifica.
 
-Con circa 2 m di cavo il simulatore dà un tempo di salita di 24 ns e circa −3 dB a 15 MHz, in linea con i 23,4 ns e con il taglio fra 15 e 20 MHz misurati in laboratorio.
+Con il generatore adattato la lunghezza del cavo non cambia né il tempo di salita né l’ampiezza a 15 MHz: il tempo di salita misurato (circa 20 ns) viene dal fronte del generatore. Il taglio fra 15 e 20 MHz osservato in laboratorio non si spiega con il cavo: le cause probabili sono adattatori, puntali o il metodo di misura (vedi [verifica-fisica.md](verifica-fisica.md)).

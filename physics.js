@@ -11,11 +11,23 @@ const Physics = (() => {
   // Cavo coassiale RG-58 C/U: circa 101 pF/m (valore nominale di catalogo).
   // Sonda ×10 compensata: 10 MΩ con 10–15 pF alla punta (dispense del corso).
   // Accoppiamento AC: banda da 10 Hz a −3 dB (manuale, cap. 8).
+  // Cavo RG-58: 50 Ω, fattore di velocità 0,66, cioè circa 5 ns/m.
   const SCOPE_R = 1e6,
     SCOPE_C = 22e-12,
     CABLE_C_PER_M = 101e-12,
+    CABLE_DELAY_PER_M = 1 / (0.66 * 299792458),
     PROBE_TIP_C = 13e-12,
     AC_CORNER_HZ = 10;
+  // Fronti del generatore (User's Guide, cap. 8): quadra < 20 ns,
+  // triangolo, rampa e arbitrarie 40 ns tipici. La sinusoide è piatta.
+  const EDGE_DEFAULT = 20e-9,
+    EDGE_SLOW = 40e-9;
+  const cableDelay = (lab) => (lab.cable ?? 1) * CABLE_DELAY_PER_M;
+  function edgeTau(g, lab) {
+    if (g.wave === "SQUARE") return (lab.genEdge ?? EDGE_DEFAULT) / 2.2;
+    if (["TRIANGLE", "RAMP", "ARB"].includes(g.wave)) return EDGE_SLOW / 2.2;
+    return 0;
+  }
 
   const defaults = {
     "EXP RISE": (p) => Math.exp(5 * (p - 1)),
@@ -232,9 +244,10 @@ const Physics = (() => {
       conductance += 1 / SCOPE_R;
       cap += SCOPE_C + cable;
     }
-    // Cavo del generatore: arriva alla breadboard (RC) o direttamente al
-    // primo canale (collegamento diretto), e conta una sola volta.
-    if (node === "in" && lab.circuit !== "open") cap += cable;
+    // Il cavo del generatore è una linea adattata (Rs = Z0 = 50 Ω): al suo
+    // capo il nodo vede di nuovo 50 Ω con la tensione ritardata, senza la
+    // capacità del cavo. I cavi verso l'oscilloscopio sono tronchi aperti:
+    // fino a circa 20 MHz per 1–2 m equivalgono alla loro capacità.
     return { conductance, cap };
   }
 
@@ -244,6 +257,11 @@ const Physics = (() => {
         [0, 0],
         [0, 0],
       ];
+    const delay = TAU * hz * cableDelay(lab);
+    const lag = [Math.cos(delay), -Math.sin(delay)];
+    return nodeTransfer(lab, hz).map((h) => cMul(h, lag));
+  }
+  function nodeTransfer(lab, hz) {
     const input = load(lab, "in"),
       output = load(lab, "out");
     const w = TAU * hz;
@@ -279,7 +297,7 @@ const Physics = (() => {
     const input = load(lab, "in"),
       output = load(lab, "out");
     if (lab.circuit === "open") return () => [0, 0];
-    const dc = transfer(lab, 0).map((z) => z[0]);
+    const dc = nodeTransfer(lab, 0).map((z) => z[0]);
     if (lab.circuit === "direct") {
       const q = input.cap
         ? Math.exp((-dt * (0.02 + input.conductance)) / input.cap)
@@ -334,9 +352,12 @@ const Physics = (() => {
     const points = clamp(2 ** Math.ceil(Math.log2(Math.max(1, wanted))), 2048, 131072);
     const dt = period / points;
     const advance = stepper(lab, dt);
-    const forcing = Float64Array.from({ length: points }, (_, i) =>
-      source(g, (i + 0.5) * dt, () => 0),
+    const delay = cableDelay(lab);
+    let forcing = Float64Array.from({ length: points }, (_, i) =>
+      source(g, (i + 0.5) * dt - delay, () => 0),
     );
+    const tg = edgeTau(g, lab);
+    if (tg && dt < 20 * tg) forcing = firstOrder(forcing, dt, tg, false, null);
     const run = (state) => {
       for (const value of forcing) state = advance(state, value);
       return state;
@@ -385,7 +406,8 @@ const Physics = (() => {
     );
     const dt = (t1 - start) / n;
     const advance = stepper(lab, dt);
-    const dc = transfer(lab, 0).map((z) => z[0]);
+    const dc = nodeTransfer(lab, 0).map((z) => z[0]);
+    const delay = cableDelay(lab);
     // Stato iniziale: punto di lavoro in continua per il valor medio della
     // sorgente, così anche le costanti di tempo lunghe partono a regime.
     let mean = 0;
@@ -393,8 +415,15 @@ const Physics = (() => {
       mean += source(g, start + ((i + 0.5) * (t1 - start)) / 4096, external) / 4096;
     let state = dc.map((h) => h * mean);
     const values = [new Float64Array(n + 1), new Float64Array(n + 1)];
+    const tg = edgeTau(g, lab),
+      edge = tg && dt < 20 * tg ? Math.exp(-dt / tg) : 0;
+    let u = mean;
     for (let i = 0; i <= n; i++) {
-      if (i) state = advance(state, source(g, start + (i - 0.5) * dt, external));
+      if (i) {
+        const raw = source(g, start + (i - 0.5) * dt - delay, external);
+        u = edge ? edge * u + (1 - edge) * raw : raw;
+        state = advance(state, u);
+      }
       values[0][i] = state[0];
       values[1][i] = state[1];
     }
@@ -715,7 +744,7 @@ const Physics = (() => {
     videoStandards,
     videoAt,
     calibrationAt,
-    constants: { SCOPE_R, SCOPE_C, CABLE_C_PER_M, PROBE_TIP_C, AC_CORNER_HZ },
+    constants: { SCOPE_R, SCOPE_C, CABLE_C_PER_M, CABLE_DELAY_PER_M, PROBE_TIP_C, AC_CORNER_HZ, EDGE_DEFAULT },
   };
 })();
 

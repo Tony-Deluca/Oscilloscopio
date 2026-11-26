@@ -201,6 +201,8 @@ const labDefault = () => ({
   ext: "none",
   mod: "none",
   cable: 1,
+  // Fronti della quadra del 33120A: dichiarati < 20 ns (User's Guide, cap. 8).
+  genEdge: 20e-9,
 });
 let g = genDefault(),
   s = scopeDefault(),
@@ -3878,12 +3880,29 @@ function setupLab() {
   cableInput.value = lab.cable;
   cableLabel.append("Cavi coassiali (m)", cableInput);
   patch.append(cableLabel);
+  const edgeLabel = document.createElement("label"),
+    edgeInput = document.createElement("input");
+  edgeInput.id = "gen-edge";
+  edgeInput.type = "number";
+  edgeInput.min = "1";
+  edgeInput.max = "40";
+  edgeInput.step = "1";
+  edgeInput.value = lab.genEdge * 1e9;
+  edgeLabel.append("Fronti quadra (ns)", edgeInput);
+  patch.append(edgeLabel);
+  edgeInput.addEventListener("input", () => {
+    if (edgeInput.validity.valid && Number.isFinite(edgeInput.valueAsNumber)) {
+      lab.genEdge = edgeInput.valueAsNumber * 1e-9;
+      changed();
+    } else if (edgeInput.value !== "")
+      say("Fronti dell'onda quadra fra 1 e 40 ns (il 33120A dichiara meno di 20 ns)");
+  });
   cableInput.addEventListener("input", () => {
     if (cableInput.validity.valid && Number.isFinite(cableInput.valueAsNumber)) {
       lab.cable = cableInput.valueAsNumber;
       changed();
     } else if (cableInput.value !== "")
-      say("Lunghezza dei cavi fra 0 e 5 m: oltre, il modello a capacità concentrata non vale più");
+      say("Lunghezza dei cavi fra 0 e 5 m");
   });
   const jack = (id, label, target) => {
     const b = document.createElement("button");
@@ -3969,6 +3988,7 @@ function setupLab() {
     $("resistance").value = lab.r;
     $("capacitance").value = 82;
     $("cable").value = lab.cable;
+    $("gen-edge").value = lab.genEdge * 1e9;
     changed();
     say("Assetto foto ripristinato");
   };
