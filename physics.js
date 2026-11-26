@@ -733,6 +733,7 @@ const Physics = (() => {
     factoryArbs,
     load,
     transfer,
+    nodeTransfer,
     response,
     signal,
     analog,

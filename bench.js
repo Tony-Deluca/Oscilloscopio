@@ -532,7 +532,8 @@ function rangeG(field) {
     freq: [0.0001, maxFrequency()],
     amp: [
       Math.max(g.term === "HIGH Z" ? 0.1 : 0.05, offset / 2),
-      Math.min(2 * half * arbAmplitudeFactor(), 2 * (half - offset)),
+      // Arrotondato per difetto alla risoluzione del display (SINC: 6,084 Vpp).
+      Math.min(Math.floor(2 * half * arbAmplitudeFactor() * 1000) / 1000, 2 * (half - offset)),
     ],
     offset: [-offsetLimit, offsetLimit],
     duty: g.freq <= 5e6 ? [20, 80] : [40, 60],
@@ -649,8 +650,9 @@ function chooseGenWave(wave) {
     g.amp = clamp(g.amp, ...rangeG("amp"));
     g.offset = clamp(g.offset, ...rangeG("offset"));
   }
-  if (g.freq !== before[0]) setGenMessage("FREQ LIMIT");
-  else if (g.amp !== before[1]) setGenMessage("AMPL LIMIT");
+  const moved = (a, b) => Math.abs(a - b) > 1e-9 * Math.max(1, Math.abs(b));
+  if (moved(g.freq, before[0])) setGenMessage("FREQ LIMIT");
+  else if (moved(g.amp, before[1])) setGenMessage("AMPL LIMIT");
   else if (genReadout === "MAX VALUE") genReadout = "";
 }
 function currentGenItem() {
@@ -1416,7 +1418,7 @@ function scopeRows() {
   const info = (label, value) => row(label, value, null);
   const back = (menu) =>
     row(
-      "Indietro",
+      "Previous",
       "",
       () => {
         s.menu = menu;

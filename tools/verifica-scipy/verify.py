@@ -101,11 +101,12 @@ for item in js["cable"]:
     length = item["len"]
     tline_sq = lambda f: line(f, length) * edge(f) * lp150(f)
     r_t = rise_from(tline_sq)
-    p_t = abs(line(15e6, length) * lp150(15e6))
+    p_t = abs(line(15e6, length, loss=False) * lp150(15e6))
+    p_loss = abs(line(15e6, length) * lp150(15e6))
     row(f"Cavo {length:g} m: tempo di salita (ns), simulatore / linea di trasmissione", item["rise"] * 1e9, r_t * 1e9,
         abs(item["rise"] - r_t) < 1.0e-9, "")
-    row(f"Cavo {length:g} m: |H| a 15 MHz, simulatore / linea di trasmissione", item["peak15"], p_t,
-        abs(item["peak15"] - p_t) < 0.02, "sinusoide, senza filtro sul fronte")
+    row(f"Cavo {length:g} m: |H| a 15 MHz, simulatore / linea senza perdite", item["peak15"], p_t,
+        abs(item["peak15"] - p_t) < 1e-3, f"con le perdite RG-58 sarebbe {p_loss:.4f}: non simulate")
 
 # 5. Spettro: numpy.fft con finestre simmetriche di scipy e guadagno coerente
 wins = {"Rectangular": lambda n: np.ones(n), "Hanning": lambda n: windows.hann(n, sym=True),

@@ -889,7 +889,7 @@ select:focus-visible {
 /* Avvisi: un cartellino che si accende in basso a destra. */
 .notice {
   position: fixed;
-  right: 14px;
+  left: 14px;
   bottom: 14px;
   z-index: 5;
   max-width: min(400px, 90vw);
