@@ -442,6 +442,7 @@ Con la memoria da 500 punti vale **fs = 25 / (Time/div)**. I valori in grassetto
 - il tempo morto fra due acquisizioni: 10 ms più 0,4 µs per punto; in Average lo strumento fa un'acquisizione ogni record più 5 ms (circa 67 al secondo a 500 µs/div);
 - in Peak Detect le conversioni per intervallo sono limitate da un budget di calcolo (circa 2·10⁵ per canale e acquisizione), quindi a velocità molto lente un impulso più stretto dell'intervallo diviso per quel numero può sfuggire;
 - il timeout del trigger automatico: 150 ms o la durata del record;
+- i valori del Default Setup dell'oscilloscopio (CH1 2 V/div DC, CH2 spento, 1 ms/div, Sample, trigger Edge Auto su CH1): il manuale non li elenca; sono anche l'assetto di apertura del simulatore;
 - la sonda ×100 trattata come la ×10;
 - il fronte dell’onda quadra del generatore: 20 ns di partenza, il limite dichiarato, modificabile da 1 a 40 ns nel pannello del banco; triangolo, rampa e forme arbitrarie con i 40 ns tipici; la sinusoide senza filtro, piatta fino a 15 MHz come da specifica.
 
