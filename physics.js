@@ -297,32 +297,35 @@ const Physics = (() => {
     };
   }
 
-  // Integratore esatto del circuito per un ingresso costante su ogni passo.
-  function stepper(lab, dt) {
+  // Integratore esatto del circuito per un ingresso costante su ogni passo:
+  // transitions(lab)(dt) restituisce il passo di durata dt.
+  function transitions(lab) {
     const input = load(lab, "in"),
       output = load(lab, "out");
-    if (lab.circuit === "open") return () => [0, 0];
+    if (lab.circuit === "open") return () => () => [0, 0];
     const dc = nodeTransfer(lab, 0).map((z) => z[0]);
-    if (lab.circuit === "direct") {
-      const q = input.cap
-        ? Math.exp((-dt * (0.02 + input.conductance)) / input.cap)
-        : 0;
-      return (state, u) => {
-        const v = dc[0] * u + q * (state[0] - dc[0] * u);
-        return [v, v];
+    if (lab.circuit === "direct")
+      return (dt) => {
+        const q = input.cap
+          ? Math.exp((-dt * (0.02 + input.conductance)) / input.cap)
+          : 0;
+        return (state, u) => {
+          const v = dc[0] * u + q * (state[0] - dc[0] * u);
+          return [v, v];
+        };
       };
-    }
     const gr = 1 / lab.r,
       gi = 0.02 + input.conductance + gr;
     const go = gr + output.conductance,
       co = output.cap + lab.c;
-    if (!input.cap) {
-      const q = Math.exp((-dt * (go - (gr * gr) / gi)) / co);
-      return (state, u) => {
-        const v = dc[1] * u + q * (state[1] - dc[1] * u);
-        return [(0.02 * u + gr * v) / gi, v];
+    if (!input.cap)
+      return (dt) => {
+        const q = Math.exp((-dt * (go - (gr * gr) / gi)) / co);
+        return (state, u) => {
+          const v = dc[1] * u + q * (state[1] - dc[1] * u);
+          return [(0.02 * u + gr * v) / gi, v];
+        };
       };
-    }
     const a = -gi / input.cap,
       b = gr / input.cap,
       c = gr / co,
@@ -330,16 +333,35 @@ const Physics = (() => {
     const distance = Math.hypot(a - d, 2 * Math.sqrt(b * c));
     const fast = (a + d - distance) / 2;
     const slow = (gi * go - gr * gr) / (input.cap * co * fast);
-    const fastFactor = Math.exp(dt * fast),
-      slowFactor = Math.exp(dt * slow);
-    const k = (slowFactor - fastFactor) / (slow - fast);
-    const e00 = fastFactor + k * (a - fast),
-      e11 = fastFactor + k * (d - fast);
-    return (state, u) => {
-      const x = state[0] - dc[0] * u,
-        y = state[1] - dc[1] * u;
-      return [dc[0] * u + e00 * x + k * b * y, dc[1] * u + k * c * x + e11 * y];
+    return (dt) => {
+      const fastFactor = Math.exp(dt * fast),
+        slowFactor = Math.exp(dt * slow);
+      const k = (slowFactor - fastFactor) / (slow - fast);
+      const e00 = fastFactor + k * (a - fast),
+        e11 = fastFactor + k * (d - fast);
+      return (state, u) => {
+        const x = state[0] - dc[0] * u,
+          y = state[1] - dc[1] * u;
+        return [dc[0] * u + e00 * x + k * b * y, dc[1] * u + k * c * x + e11 * y];
+      };
     };
+  }
+  const stepper = (lab, dt) => transitions(lab)(dt);
+
+  // Stato iniziale del regime periodico: run(stato) dà lo stato dopo un
+  // periodo; il sistema è lineare, quindi bastano tre prove.
+  function periodicStart(run) {
+    const v = run([0, 0]),
+      x = run([1, 0]),
+      y = run([0, 1]);
+    const a = 1 - (x[0] - v[0]),
+      b = -(y[0] - v[0]),
+      c = -(x[1] - v[1]),
+      d = 1 - (y[1] - v[1]);
+    const det = a * d - c * b;
+    return Math.abs(det) > 1e-14
+      ? [(d * v[0] - b * v[1]) / det, (a * v[1] - c * v[0]) / det]
+      : [0, 0];
   }
 
   // Costante di tempo più rapida del circuito, per scegliere il passo.
@@ -350,11 +372,17 @@ const Physics = (() => {
   }
 
   // Regime periodico ai nodi IN e OUT su un periodo del generatore.
+  const TABLE_POINTS = 131072,
+    REFINED_CELLS = 16384;
   function steadyTable(g, lab, minTau = Infinity) {
     const period = 1 / g.freq;
     const tau = Math.min(minTau, fastestTau(lab));
     const wanted = Number.isFinite(tau) ? period / (tau / 4) : 0;
-    const points = clamp(2 ** Math.ceil(Math.log2(Math.max(1, wanted))), 2048, 131072);
+    const points = clamp(2 ** Math.ceil(Math.log2(Math.max(1, wanted))), 2048, TABLE_POINTS);
+    if (wanted > TABLE_POINTS) {
+      const refined = refinedTable(g, lab, period, REFINED_CELLS, tau / 4);
+      if (refined) return refined;
+    }
     const dt = period / points;
     const advance = stepper(lab, dt);
     const delay = cableDelay(lab);
@@ -367,18 +395,7 @@ const Physics = (() => {
       for (const value of forcing) state = advance(state, value);
       return state;
     };
-    const v = run([0, 0]),
-      x = run([1, 0]),
-      y = run([0, 1]);
-    const a = 1 - (x[0] - v[0]),
-      b = -(y[0] - v[0]),
-      c = -(x[1] - v[1]),
-      d = 1 - (y[1] - v[1]);
-    const det = a * d - c * b;
-    let state =
-      Math.abs(det) > 1e-14
-        ? [(d * v[0] - b * v[1]) / det, (a * v[1] - c * v[0]) / det]
-        : [0, 0];
+    let state = periodicStart(run);
     const values = [new Float64Array(points), new Float64Array(points)];
     for (let i = 0; i < points; i++) {
       values[0][i] = state[0];
@@ -386,6 +403,122 @@ const Physics = (() => {
       state = advance(state, forcing[i]);
     }
     return { period, dt, values };
+  }
+
+  // Regime periodico su una griglia non uniforme, per i periodi lunghi:
+  // una griglia regolare per le parti lente più punti fitti dopo ogni salto
+  // della sorgente (fronti della quadra, ritorno della rampa), con passi che
+  // partono da `fine` e crescono del 4 % del tempo trascorso dal salto.
+  // Così fronti e curve di carica restano risolti a ogni frequenza; con la
+  // sola griglia regolare si allargherebbero fino al suo passo (con 131072
+  // punti, 7,6 µs a 1 Hz e 763 µs a 10 mHz).
+  function refinedTable(g, lab, period, cells, fine) {
+    const dt = period / cells;
+    const delay = cableDelay(lab);
+    const raw = (t) => source(g, t - delay, () => 0);
+    const grid = new Float64Array(cells + 1);
+    let lo = Infinity,
+      hi = -Infinity;
+    for (let k = 0; k <= cells; k++) {
+      grid[k] = raw(k * dt);
+      lo = Math.min(lo, grid[k]);
+      hi = Math.max(hi, grid[k]);
+    }
+    // Salto: più di un quarto dell'escursione in una sola cella.
+    const threshold = 0.25 * (hi - lo);
+    if (!(threshold > 0)) return null;
+    const jumps = [];
+    for (let k = 0; k < cells; k++) {
+      if (Math.abs(grid[k + 1] - grid[k]) <= threshold) continue;
+      if (jumps.length === 64) return null;
+      // Istante del salto per bisezione, a meno di un millesimo di `fine`.
+      let a = k * dt,
+        b = (k + 1) * dt;
+      for (let i = 0; i < 80 && b - a > fine * 1e-3; i++) {
+        const m = (a + b) / 2,
+          v = raw(m);
+        if (Math.abs(v - grid[k]) <= Math.abs(v - grid[k + 1])) a = m;
+        else b = m;
+      }
+      jumps.push(b);
+    }
+    if (!jumps.length) return null;
+    // Punti fitti dopo ogni salto, riportati nel periodo e ordinati.
+    const extra = [];
+    for (const t of jumps) {
+      let s = 0;
+      for (let h = fine; h < dt; h = Math.max(fine, 0.04 * s)) {
+        const x = t + s;
+        extra.push(x - Math.floor(x / period) * period);
+        s += h;
+      }
+    }
+    extra.sort((a, b) => a - b);
+    // Fusione con la griglia regolare, senza punti quasi coincidenti.
+    const gap = fine * 1e-3;
+    const merged = new Float64Array(cells + extra.length);
+    let n = 0;
+    for (let k = 0, e = 0; k < cells || e < extra.length; ) {
+      const t =
+        e === extra.length || (k < cells && k * dt <= extra[e]) ? k++ * dt : extra[e++];
+      if (!n || t - merged[n - 1] > gap) merged[n++] = t;
+    }
+    while (period - merged[n - 1] <= gap) n--;
+    const times = merged.subarray(0, n);
+    // Durata di ogni passo; quelli della griglia regolare valgono dt esatto.
+    const span = new Float64Array(n);
+    for (let j = 0; j < n; j++) {
+      const h = (j + 1 < n ? times[j + 1] : period) - times[j];
+      span[j] = Math.abs(h - dt) <= 1e-9 * dt ? dt : h;
+    }
+    // Ingresso costante su ogni passo: media della sorgente filtrata dai
+    // fronti del generatore (primo ordine), esatta per sorgente costante.
+    const forcing = new Float64Array(n);
+    for (let j = 0; j < n; j++) forcing[j] = raw(times[j] + span[j] / 2);
+    const tg = edgeTau(g, lab);
+    if (tg) {
+      const mid = forcing.slice(),
+        regularDecay = Math.exp(-dt / tg);
+      let w = mid[n - 1];
+      for (let pass = 0; pass < 2; pass++)
+        for (let j = 0; j < n; j++) {
+          const h = span[j],
+            m = mid[j],
+            e = h === dt ? regularDecay : Math.exp(-h / tg);
+          forcing[j] = m + ((w - m) * (1 - e) * tg) / h;
+          w = m + (w - m) * e;
+        }
+    }
+    const transition = transitions(lab),
+      regular = transition(dt),
+      memo = new Map(),
+      advance = new Array(n);
+    for (let j = 0; j < n; j++) {
+      const h = span[j];
+      if (h !== dt && !memo.has(h)) memo.set(h, transition(h));
+      advance[j] = h === dt ? regular : memo.get(h);
+    }
+    const run = (state) => {
+      for (let j = 0; j < n; j++) state = advance[j](state, forcing[j]);
+      return state;
+    };
+    let state = periodicStart(run);
+    const values = [new Float64Array(n), new Float64Array(n)];
+    for (let j = 0; j < n; j++) {
+      values[0][j] = state[0];
+      values[1][j] = state[1];
+      state = advance[j](state, forcing[j]);
+    }
+    // Passo che porta a ogni punto, per i filtri dello stadio d'ingresso, e
+    // primo punto di ogni cella regolare, per la ricerca nella tabella.
+    const steps = new Float64Array(n);
+    for (let j = 0; j < n; j++) steps[j] = span[(j + n - 1) % n];
+    const cellStart = new Int32Array(cells + 1);
+    for (let k = 0, j = 0; k <= cells; k++) {
+      while (j + 1 < n && times[j + 1] <= k * dt) j++;
+      cellStart[k] = j;
+    }
+    return { period, dt, values, times, steps, cellStart, cells };
   }
 
   // Evoluzione non periodica (modulazioni, rumore) su un intervallo.
@@ -443,6 +576,29 @@ const Physics = (() => {
       return mix(values[i], values[(i + 1) % n], p - Math.floor(p));
     };
   };
+  // Lettura di una tabella periodica, uniforme o non uniforme.
+  function tableLookup(table, values) {
+    if (!table.times) return periodicLookup(values, table.period);
+    const { period, times, cellStart, cells } = table;
+    const n = times.length,
+      width = period / cells;
+    return (t) => {
+      const x = frac(t / period) * period;
+      const k = Math.min(cells - 1, Math.floor(x / width));
+      let lo = cellStart[k],
+        hi = cellStart[k + 1];
+      while (lo > 0 && times[lo] > x) lo--;
+      if (times[hi] <= x) lo = hi;
+      else
+        while (hi - lo > 1) {
+          const m = (lo + hi) >> 1;
+          if (times[m] <= x) lo = m;
+          else hi = m;
+        }
+      const next = lo + 1 < n ? times[lo + 1] : period;
+      return mix(values[lo], values[(lo + 1) % n], (x - times[lo]) / (next - times[lo]));
+    };
+  }
   const linearLookup = (values, start, dt) => (t) => {
     const p = clamp((t - start) / dt, 0, values.length - 1 - 1e-9);
     const i = Math.floor(p);
@@ -463,8 +619,8 @@ const Physics = (() => {
         );
     }
     const table = steadyTable(g, lab);
-    const a = periodicLookup(table.values[0], table.period),
-      b = periodicLookup(table.values[1], table.period);
+    const a = tableLookup(table, table.values[0]),
+      b = tableLookup(table, table.values[1]);
     return (t) => [a(t), b(t)];
   }
 
@@ -488,19 +644,30 @@ const Physics = (() => {
     }
     return cDiv(h, [1, hz / spec.bw]);
   }
+  // Filtro del primo ordine su campioni a passo dt, oppure a passi diversi
+  // se dt è un array (dt[i] = durata del passo che arriva al campione i).
   function firstOrder(u, dt, tau, highpass, init) {
     const n = u.length,
       out = new Float64Array(n);
-    const a = Math.exp(-dt / tau);
+    const decay = new Float64Array(n);
+    if (typeof dt === "number") decay.fill(Math.exp(-dt / tau));
+    else
+      for (let i = 0, last = NaN, value = 0; i < n; i++) {
+        if (dt[i] !== last) value = Math.exp(-(last = dt[i]) / tau);
+        decay[i] = value;
+      }
     let x = init;
     if (init === null) {
       // Regime periodico: x(0) = x(T).
-      let r = 0;
-      for (let i = 0; i < n; i++) r = a * r + (1 - a) * u[i];
-      x = r / -Math.expm1((-n * dt) / tau);
+      let r = 0,
+        total = 0;
+      for (let i = 0; i < n; i++) r = decay[i] * r + (1 - decay[i]) * u[i];
+      if (typeof dt === "number") total = n * dt;
+      else for (const h of dt) total += h;
+      x = r / -Math.expm1(-total / tau);
     }
     for (let i = 0; i < n; i++) {
-      x = a * x + (1 - a) * u[i];
+      x = decay[i] * x + (1 - decay[i]) * u[i];
       out[i] = highpass ? u[i] - x : x;
     }
     return out;
@@ -510,7 +677,8 @@ const Physics = (() => {
     if (spec.ac)
       y = firstOrder(y, dt, 1 / (TAU * AC_CORNER_HZ), true, periodic ? null : bias);
     const tl = 1 / (TAU * spec.bw);
-    if (dt < 20 * tl) y = firstOrder(y, dt, tl, false, periodic ? null : y[0]);
+    if (typeof dt !== "number" || dt < 20 * tl)
+      y = firstOrder(y, dt, tl, false, periodic ? null : y[0]);
     return y;
   }
 
@@ -567,8 +735,8 @@ const Physics = (() => {
       }
       if (periodic) {
         table ??= steadyTable(g, lab, minTau);
-        const y = frontEndTable(table.values[k], table.dt, spec, true);
-        return periodicLookup(y, table.period);
+        const y = frontEndTable(table.values[k], table.steps ?? table.dt, spec, true);
+        return tableLookup(table, y);
       }
       transient ??= transientTable(g, lab, t0, t1, external, minTau);
       const u = transient.values[k];

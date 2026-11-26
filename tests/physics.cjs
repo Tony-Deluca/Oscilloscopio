@@ -29,6 +29,15 @@ const square=P.signal({...gen,wave:'SQUARE',freq:100},lab,0,.01,()=>0);
 const probeTime=50e-6,tau=(50+r)*c;
 const ideal=.5*(1-2*Math.exp(-probeTime/tau));
 close(square(probeTime)[1],ideal,.005,'square step');
+// Frequenze basse: il periodo lungo non deve allargare fronti e curva di carica.
+const edgeAt=P.constants.CABLE_DELAY_PER_M;
+const fast=P.signal({...gen,wave:'SQUARE',freq:100},lab,0,1,()=>0);
+for (const freq of [1,0.01]) {
+ const slow=P.signal({...gen,wave:'SQUARE',freq},lab,0,1,()=>0);
+ assert.ok(slow(edgeAt+100e-9)[0]>0.45,`fronte su IN a ${freq} Hz`);
+ for (const t of [50e-9,50e-6,180e-6,500e-6]) close(slow(edgeAt+t)[1],fast(edgeAt+t)[1],1e-3,`carica a ${freq} Hz dopo ${t} s`);
+ close(slow(edgeAt+probeTime)[1],ideal,.005,`gradino a ${freq} Hz`);
+}
 const bins=P.spectrum(Float64Array.from({length:512},(_,i)=>Math.sin(2*Math.PI*24*i/512)), 'Rectangular');
 close(bins[24],1/Math.SQRT2,1e-12,'FFT amplitude');
 assert.equal(bins.indexOf(Math.max(...bins)),24);
