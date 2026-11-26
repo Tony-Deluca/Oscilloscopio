@@ -2,6 +2,8 @@
 
 Banco RC è un simulatore, che gira nel browser, del banco di laboratorio usato nelle esercitazioni di misure elettroniche. Riproduce il generatore di funzione **HP 33120A**, l'oscilloscopio digitale **GW Instek GDS-820C** e un **circuito RC** collegato ai due canali, con lo stesso pannello, gli stessi tasti e lo stesso comportamento degli strumenti veri.
 
+**Versione online, da usare o installare come app:** https://tony-deluca.github.io/Oscilloscopio/
+
 Il progetto è stato realizzato da **Antonio De Luca** e **Federico Boccalatte**, studenti del corso di Fondamenti di misure del prof. **Egidio De Benedetto** (Corso di Laurea in Ingegneria Informatica, A.A. 2026/2027).
 
 ![Banco RC: generatore, oscilloscopio e circuito](docs/evidenze/desktop.png)
@@ -20,24 +22,24 @@ Banco RC permette di ripassare quei passaggi, o di vederli per la prima volta, a
 
 ## Come si usa
 
-### Aprirlo subito
+### Usarlo online
 
-Apri [`banco-rc.html`](banco-rc.html) con un doppio clic: contiene tutto in un solo file e funziona in qualsiasi browser, anche offline.
+Apri **https://tony-deluca.github.io/Oscilloscopio/** in un browser. È la versione sempre aggiornata, pubblicata con GitHub Pages: ogni modifica al branch `main` arriva sul sito in un paio di minuti. Chi apre il link può usare il simulatore e installarlo, ma non modificare il progetto.
 
 ### Installarlo come app
 
-Banco RC è anche una PWA, cioè un'app web installabile: ha la sua icona, si apre in una finestra propria e funziona offline. Per installarla il browser deve aprirla da un indirizzo `http://`, non dal file sul disco. Puoi farlo in due modi.
+Banco RC è una PWA, cioè un'app web installabile: ha la sua icona, si apre in una finestra propria e funziona anche senza internet.
 
-**Online.** Se il repository è pubblicato con GitHub Pages, apri il suo indirizzo e installa l'app.
+- **Computer, Chrome:** apri il link e clicca l'icona **Installa** a destra nella barra degli indirizzi. Se non la vedi: menu ⋮ → **Trasmetti, salva e condividi → Installa pagina come app**.
+- **Computer, Edge:** menu **…** → **App → Installa questo sito come app**.
+- **Android, Chrome:** menu ⋮ → **Installa app** o **Aggiungi a schermata Home**.
+- **iPhone, Safari:** tasto **Condividi** → **Aggiungi alla schermata Home**.
 
-**Dal tuo computer.**
+Dopo l'installazione l'app si apre dal menu Start, dal Launchpad o dalla schermata Home e funziona offline. Quando la apri con internet scarica da sola l'ultima versione; se non la vedi subito, chiudi e riapri l'app. Firefox per computer non installa le PWA: si può usare il sito, ma non installarlo.
 
-1. Scarica tutta la cartella del progetto (su GitHub: **Code → Download ZIP**) ed estraila.
-2. Serve Python. Su Windows, se il comando `py` non esiste, installalo con `winget install -e --id Python.Python.3.12` oppure dal Microsoft Store, poi apri un nuovo terminale.
-3. Apri un terminale nella cartella che contiene `index.html` e avvia un piccolo server: `py -m http.server 8000` su Windows, `python3 -m http.server 8000` su macOS e Linux.
-4. Apri http://localhost:8000/index.html in Chrome o Edge e clicca l'icona **Installa** nella barra degli indirizzi. Se non la vedi: menu ⋮ → **Trasmetti, salva e condividi → Installa pagina come app**.
+### Senza internet e senza installazione
 
-Dopo l'installazione il server non serve più: l'app si apre dal menu Start o dal Launchpad e funziona offline. Quando la riapri con la rete e il server disponibili, scarica gli aggiornamenti da sola. Su telefono: in Chrome menu ⋮ → **Installa app**; su iPhone in Safari Condividi → **Aggiungi alla schermata Home**. Firefox per computer non installa le PWA.
+Scarica [`banco-rc.html`](banco-rc.html) e aprilo con un doppio clic: contiene tutto in un solo file e funziona in qualsiasi browser, anche offline, ma non diventa un'app con icona.
 
 ### Primi passi
 
@@ -101,6 +103,12 @@ Dopo ogni modifica a `index.html`, `style.css`, `physics.js` o `bench.js` rigene
 
 ```bash
 node tools/build-standalone.mjs
+```
+
+Per provare la PWA in locale prima di pubblicarla, servi la cartella del progetto via http e apri http://localhost:8000/index.html; aprendo `index.html` direttamente dal disco l'app non si installa.
+
+```bash
+python3 -m http.server 8000
 ```
 
 Il test del modello fisico non richiede il browser:
