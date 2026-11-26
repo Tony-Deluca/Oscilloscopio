@@ -4077,51 +4077,61 @@ function setupLab() {
     });
   }
   $("lab-preset").onclick = () => {
-    $("reset-lab").click();
-    g = factoryGen(g);
-    genField = "freq";
-    lab.circuit = "direct";
-    lab.channels[1].node = "none";
-    factoryScope();
-    s.menu = "CH1";
-    $("circuit").value = lab.circuit;
-    changed();
+    experiencePreset();
     say("Assetto delle esperienze: generatore su CH1, strumenti alle impostazioni di fabbrica");
   };
   $("reset-lab").onclick = () => {
-    stopProgram();
-    g = genDefault();
-    g.arbs = storedArbs();
-    s = scopeDefault();
-    lab = labDefault();
-    capture = null;
-    pending = null;
-    averageState = null;
-    etState = null;
-    rollState = null;
-    overlay = [];
-    undo = null;
-    lastTrigger = -Infinity;
-    help = null;
-    genShift = false;
-    genReadout = "";
-    genAction = null;
-    genEntry = null;
-    menuLevel = -1;
-    menuIndex = 0;
-    menuGroup = 0;
-    genField = "amp";
-    genUnit = "Vpp";
-    preferredRow = 0;
-    digit = 0;
-    $("circuit").value = lab.circuit;
-    $("resistance").value = lab.r;
-    $("capacitance").value = 82;
-    $("cable").value = lab.cable;
-    $("gen-edge").value = lab.genEdge * 1e9;
-    changed();
+    photoPreset();
     say("Assetto foto ripristinato");
   };
+}
+// Assetto della foto: circuito RC, 870 Hz, 1 Vpp, cursori come nella foto.
+function photoPreset() {
+  stopProgram();
+  g = genDefault();
+  g.arbs = storedArbs();
+  s = scopeDefault();
+  lab = labDefault();
+  capture = null;
+  pending = null;
+  averageState = null;
+  etState = null;
+  rollState = null;
+  overlay = [];
+  undo = null;
+  lastTrigger = -Infinity;
+  help = null;
+  genShift = false;
+  genReadout = "";
+  genAction = null;
+  genEntry = null;
+  menuLevel = -1;
+  menuIndex = 0;
+  menuGroup = 0;
+  genField = "amp";
+  genUnit = "Vpp";
+  preferredRow = 0;
+  digit = 0;
+  $("circuit").value = lab.circuit;
+  $("resistance").value = lab.r;
+  $("capacitance").value = 82;
+  $("cable").value = lab.cable;
+  $("gen-edge").value = lab.genEdge * 1e9;
+  changed();
+}
+// Assetto delle esperienze, anche all'apertura: generatore collegato
+// direttamente a CH1, entrambi gli strumenti come appena accesi e alle
+// impostazioni di fabbrica.
+function experiencePreset() {
+  photoPreset();
+  g = factoryGen(g);
+  genField = "freq";
+  lab.circuit = "direct";
+  lab.channels[1].node = "none";
+  factoryScope();
+  s.menu = "CH1";
+  $("circuit").value = lab.circuit;
+  changed();
 }
 function download(blob, name) {
   const url = URL.createObjectURL(blob),
@@ -4232,6 +4242,7 @@ g.arbs = storedArbs();
 setupGenerator();
 setupScope();
 setupLab();
+experiencePreset();
 new ResizeObserver(traceCanvas).observe(canvas);
 render();
 requestAnimationFrame(tick);

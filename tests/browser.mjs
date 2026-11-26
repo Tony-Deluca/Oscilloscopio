@@ -38,6 +38,9 @@ await send('Page.enable');
 await resize(1410,950);
 await send('Page.navigate',{url:pathToFileURL(filename).href});
 await delay(400);
+// All'apertura c'è l'assetto delle esperienze; il test parte dall'assetto della foto.
+await click('reset-lab');
+await delay(400);
 assert.ok((await js('document.body.innerText')).includes('1.000 VPP'));
 let measurement=await js('({ hz:capture.hz, dt:capture.dt, ch1:metricCache[0], ch2:metricCache[1] })');
 assert.ok(Math.abs(measurement.hz-870)<1, JSON.stringify(measurement));

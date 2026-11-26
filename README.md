@@ -1,6 +1,6 @@
 # Banco RC
 
-Simulatore del generatore HP 33120A, dell’oscilloscopio GW Instek GDS-820C e del circuito RC collegato ai due canali. Inizialmente il generatore è impostato su 1 Vpp a 870 Hz. Il preset usa R = 2,2 kΩ e C = 82 nF come valori stimati per avvicinare le tracce della foto.
+Simulatore del generatore HP 33120A, dell’oscilloscopio GW Instek GDS-820C e del circuito RC collegato ai due canali. All’apertura il banco è nell’assetto delle esperienze: generatore collegato direttamente a CH1 e strumenti come appena accesi, alle impostazioni di fabbrica. Il pulsante «Assetto foto» ricostruisce la foto del laboratorio: 1 Vpp a 870 Hz sul passa-basso RC, con R = 2,2 kΩ e C = 82 nF stimati per avvicinare le tracce.
 
 Apri [banco-rc.html](banco-rc.html) in un browser per usare la versione autonoma. Il file contiene gli stili e gli script. La versione con sorgenti separati si avvia da [index.html](index.html).
 
