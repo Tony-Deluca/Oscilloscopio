@@ -61,8 +61,13 @@ const Physics = (() => {
   const normalizations = new WeakMap();
   function arbValue(points, p) {
     if (!normalizations.has(points)) {
-      const lo = Math.min(...points),
-        hi = Math.max(...points);
+      // Ciclo, non Math.min(...points): array lunghi superano lo stack.
+      let lo = Infinity,
+        hi = -Infinity;
+      for (const v of points) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
       normalizations.set(points, [lo, hi]);
     }
     const [lo, hi] = normalizations.get(points);

@@ -138,6 +138,13 @@ check('Vhi/Vlo su rampa = massimo/minimo', Math.abs(m.Vhi-0.49)<1e-9 && Math.abs
 await js("document.getElementById('lab-preset').click()"); await wait(300);
 m=await js("({circuit:lab.circuit, ch2:lab.channels[1].node, term:g.term, freq:g.freq, amp:g.amp, scale:s.channels[0].scale})");
 check('Assetto esperienze: diretto su CH1, generatore e oscilloscopio di fabbrica', m.circuit==='direct' && m.ch2==='none' && m.term==='50 Ω' && m.freq===1000 && m.scale===2, m);
+// Robustezza: Peak Detect con 125 000 punti, dati salvati danneggiati, arb piatta
+m=await js("(()=>{s.recordLength=125000; s.time=0.0005; s.acq='Peak'; changed(); armAcquisition(now()); pending.trigger=now()+0.01; pending.triggered=true; const a=performance.now(); try{ completeAcquisition(pending); updateMetrics(); viewSlice(); }catch(e){ return {errore:String(e)}; } const ms=performance.now()-a; pending=null; s.recordLength=500; s.acq='Average'; changed(); return {ms:Math.round(ms), vpp:metricCache[0].Vpp};})()");
+check('Peak Detect con 125 000 punti senza errori e in meno di 400 ms', !m.errore && m.ms<400 && Number.isFinite(m.vpp), m);
+m=await js("(()=>{localStorage.setItem('banco-rc-setups', JSON.stringify({3:{channels:null, time:'x', cursorT:[1]}})); try{ recallSetup(3); render(); }catch(e){ return {errore:String(e)}; } const ok=s.channels.length===2 && timeSteps.includes(s.time) && s.cursorT.length===2; localStorage.removeItem('banco-rc-setups'); return {ok};})()");
+check('Configurazione salvata danneggiata richiamata senza errori', m.ok===true, m);
+m=await js("(()=>{g.arbs.FLAT=Array(8).fill(0); g.arb='FLAT'; chooseGenWave('ARB'); editGen('amp',1); const a=g.amp; delete g.arbs.FLAT; chooseGenWave('SINE'); return {amp:a};})()");
+check('Forma arbitraria piatta: ampiezza non azzerata', m.amp===1, m);
 // 14. Prestazioni: durata di un’acquisizione con memorie lunghe
 await reset();
 m=await js(`(()=>{const out={}; for(const L of [500,12500,125000]){ s.recordLength=L; s.time=0.0005; s.acq='Sample'; changed(); armAcquisition(now()); pending.trigger=now()+0.01; pending.triggered=true; const a=performance.now(); completeAcquisition(pending); updateMetrics(); viewSlice(); out[L]=Math.round(performance.now()-a); pending=null;} s.recordLength=500; return out;})()`);

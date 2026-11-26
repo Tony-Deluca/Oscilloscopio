@@ -1227,8 +1227,13 @@ const Physics = (() => {
   const normalizations = new WeakMap();
   function arbValue(points, p) {
     if (!normalizations.has(points)) {
-      const lo = Math.min(...points),
-        hi = Math.max(...points);
+      // Ciclo, non Math.min(...points): array lunghi superano lo stack.
+      let lo = Infinity,
+        hi = -Infinity;
+      for (const v of points) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
       normalizations.set(points, [lo, hi]);
     }
     const [lo, hi] = normalizations.get(points);
@@ -2170,6 +2175,60 @@ const marks = {
   DC: "DC",
 };
 
+// Minimo e massimo con un ciclo: Math.max(...array) supera lo stack del
+// browser con array lunghi (memoria da 125 000 punti).
+function rangeOf(list) {
+  let lo = Infinity,
+    hi = -Infinity;
+  for (const v of list) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return [lo, hi];
+}
+// I dati salvati nel browser possono essere vecchi o danneggiati: si tengono
+// solo i campi con il tipo atteso, gli altri tornano al valore predefinito.
+function sanitize(defaults, value) {
+  if (Array.isArray(defaults)) {
+    if (!Array.isArray(value) || value.length !== defaults.length) return structuredClone(defaults);
+    return defaults.map((d, i) => sanitize(d, value[i]));
+  }
+  if (defaults && typeof defaults === "object") {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return Object.fromEntries(Object.keys(defaults).map((k) => [k, sanitize(defaults[k], source[k])]));
+  }
+  if (typeof defaults === "number") return Number.isFinite(value) ? value : defaults;
+  return typeof value === typeof defaults ? value : defaults;
+}
+const finiteArray = (a, min = 1) =>
+  Array.isArray(a) && a.length >= min && a.every((v) => Number.isFinite(v));
+function storedArbs() {
+  const raw = stored("arbs", {});
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .filter(([, points]) => finiteArray(points, 8) && points.length <= 16000)
+      .slice(0, 4),
+  );
+}
+function storedRefs() {
+  const raw = stored("refs", {});
+  const valid = (r) =>
+    r && finiteArray(r.points, 2) && r.dt > 0 && Number.isFinite(r.start) && r.scale > 0;
+  return Object.fromEntries(["A", "B"].filter((k) => valid(raw?.[k])).map((k) => [k, raw[k]]));
+}
+function storedGen(value) {
+  const clean = sanitize(genDefault(), value);
+  if (!["SINE", "SQUARE", "TRIANGLE", "RAMP", "NOISE", "ARB", "DC"].includes(clean.wave)) clean.wave = "SINE";
+  if (!["CONT", "AM", "FM", "FSK", "BURST", "SWEEP"].includes(clean.mode)) clean.mode = "CONT";
+  if (!["50 Ω", "HIGH Z"].includes(clean.term)) clean.term = "HIGH Z";
+  return clean;
+}
+// Raccolte salvate (configurazioni, stati): sempre un oggetto semplice.
+function storedObject(key) {
+  const raw = stored(key, {});
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
 function stored(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem("banco-rc-" + key)) ?? fallback;
@@ -2439,7 +2498,9 @@ function maxFrequency() {
 function arbAmplitudeFactor() {
   if (g.wave !== "ARB") return 1;
   const points = g.arbs[g.arb] ?? Physics.factoryArbs[g.arb];
-  return Math.min(1, (Math.max(...points) - Math.min(...points)) / 2);
+  const [lo, hi] = rangeOf(points);
+  // Una forma piatta non ha escursione da limitare: si usa la scala piena.
+  return hi - lo > 1e-12 ? Math.min(1, (hi - lo) / 2) : 1;
 }
 // Vincoli fra ampiezza e offset: |Voffset| + Vpp/2 ≤ Vmax e |Voffset| ≤ 2·Vpp,
 // con Vmax = 5 V su 50 Ω e 10 V ad alta impedenza (User's Guide, pp. 60–62).
@@ -2581,7 +2642,7 @@ function currentGenItem() {
 function enterGen() {
   if (genAction) {
     if (genAction.type === "state") {
-      const states = stored("genStates", {});
+      const states = storedObject("genStates");
       if (genAction.store) {
         states[genAction.slot] = g;
         if (save("genStates", states)) say("Stato generatore salvato");
@@ -2592,7 +2653,7 @@ function enterGen() {
             : states[genAction.slot];
         if (saved) {
           const arbs = g.arbs;
-          g = { ...genDefault(), ...saved, on: true, arbs };
+          g = { ...storedGen(saved), on: true, arbs };
           if (
             !Object.hasOwn(arbs, g.arb) &&
             !Object.hasOwn(Physics.factoryArbs, g.arb)
@@ -2721,7 +2782,7 @@ function genKey(key, digitKey) {
       const arbs = g.arbs;
       g =
         g.settings.powerOn === "LAST STATE"
-          ? { ...prior, on: true, arbs }
+          ? { ...storedGen(prior), on: true, arbs }
           : factoryGen(g);
       genField = "freq";
       genUnit = "Vpp";
@@ -3904,23 +3965,31 @@ const setupKeys = Object.keys(scopeDefault()).filter(
       "programBound",
     ].includes(k),
 );
-let refData = stored("refs", {}),
+let refData = storedRefs(),
   template = null;
 function scopeSetup() {
   return copy(Object.fromEntries(setupKeys.map((k) => [k, s[k]])));
 }
 function saveSetup() {
-  const setups = stored("setups", {});
+  const setups = storedObject("setups");
   setups[s.slot] = scopeSetup();
   if (save("setups", setups)) say("Configurazione salvata in M" + s.slot);
 }
 function recallSetup(slot) {
-  const setup = stored("setups", {})[slot];
+  const setup = storedObject("setups")[slot];
   if (!setup) {
     say("Configurazione M" + slot + " vuota");
     return false;
   }
-  Object.assign(s, setup, { slot });
+  const defaults = scopeDefault();
+  const clean = sanitize(
+    Object.fromEntries(setupKeys.map((k) => [k, defaults[k]])),
+    setup,
+  );
+  if (!timeSteps.includes(clean.time)) clean.time = defaults.time;
+  if (!lengths.includes(clean.recordLength)) clean.recordLength = defaults.recordLength;
+  for (const c of clean.channels) if (!voltSteps.includes(c.scale)) c.scale = 0.2;
+  Object.assign(s, clean, { slot });
   return true;
 }
 function factoryScope() {
@@ -4020,9 +4089,27 @@ function ratioTest() {
   if (s.goAction.includes("Beep")) playBeep();
 }
 
-let program = stored("program", {}),
-  audio;
 const programMenus = ["Measure", "Cursor"];
+// Passi del programma salvati: solo quelli con memoria, menu e tempo validi.
+function storedProgram() {
+  const raw = stored("program", {});
+  return Object.fromEntries(
+    Object.entries(raw && typeof raw === "object" ? raw : {}).filter(
+      ([n, step]) =>
+        Number(n) >= 1 &&
+        Number(n) <= 15 &&
+        Number.isInteger(step?.Memory) &&
+        step.Memory >= 1 &&
+        step.Memory <= 15 &&
+        programMenus.includes(step.Menu) &&
+        Number.isFinite(step.Time) &&
+        step.Time >= 0 &&
+        step.Time <= 99,
+    ),
+  );
+}
+let program = storedProgram(),
+  audio;
 function programListing() {
   const selected =
     s.programMode === "Edit" ? s.programStep : s["program" + s.programBound];
@@ -4142,7 +4229,7 @@ function startProgram() {
     { length: Math.max(0, s.programTo - s.programFrom + 1) },
     (_, i) => program[s.programFrom + i],
   );
-  const setups = stored("setups", {});
+  const setups = storedObject("setups");
   if (!steps.length || steps.some((step) => !step || !setups[step.Memory])) {
     say("Definisci ogni passo e salva la configurazione associata");
     return;
@@ -4748,8 +4835,7 @@ function findTrigger(fe, from, to, period) {
     times.map((t) => triggerSourceAt(fe, t)),
     dt,
   );
-  const min = Math.min(...values),
-    max = Math.max(...values);
+  const [min, max] = rangeOf(values);
   const sourceIndex = s.trigSource === "CH2" ? 1 : 0;
   const sensitivity =
     (s.trigSource === "EXT"
@@ -4919,7 +5005,7 @@ function completeAcquisition(p) {
     const adcPerSample = Math.max(1, dt * REALTIME_MAX);
     // Peak Detect e Average con memoria lunga usano più conversioni per
     // intervallo, entro un budget di calcolo per acquisizione.
-    const budget = Math.max(12, Math.floor(2e5 / length));
+    const budget = Math.max(2, Math.floor(4e5 / length));
     const sub = peak || hiRes ? Math.min(budget, Math.ceil(adcPerSample)) : 1;
     for (let i = 0; i < length; i++) {
       const t = p.trigger + start + i * dt;
@@ -5209,8 +5295,8 @@ function updateMetrics() {
     const result = Physics.measures(finite, dt);
     if (capture.extrema && !measureT) {
       const [lo, hi] = capture.extrema[j];
-      result.Vmax = Math.max(...hi);
-      result.Vmin = Math.min(...lo);
+      result.Vmax = rangeOf(hi)[1];
+      result.Vmin = rangeOf(lo)[0];
       result.Vpp = result.Vmax - result.Vmin;
     }
     return result;
@@ -5930,7 +6016,7 @@ function setupLab() {
   $("reset-lab").onclick = () => {
     stopProgram();
     g = genDefault();
-    g.arbs = stored("arbs", {});
+    g.arbs = storedArbs();
     s = scopeDefault();
     lab = labDefault();
     capture = null;
@@ -6025,7 +6111,19 @@ function render() {
   renderScope();
 }
 let shownStatus = "";
+// Il ciclo di aggiornamento non deve fermarsi: un errore in un fotogramma
+// viene registrato e l'acquisizione riparte al fotogramma successivo.
 function tick(timestamp) {
+  try {
+    tickFrame(timestamp);
+  } catch (error) {
+    console.error(error);
+    pending = null;
+    nextArm = 0;
+  }
+  requestAnimationFrame(tick);
+}
+function tickFrame(timestamp) {
   if (positionReadout && performance.now() > positionReadout.until) {
     positionReadout = null;
     renderScope();
@@ -6054,9 +6152,8 @@ function tick(timestamp) {
     } else if (triggerStatus !== shownStatus) renderScope();
     shownStatus = triggerStatus;
   }
-  requestAnimationFrame(tick);
 }
-g.arbs = stored("arbs", {});
+g.arbs = storedArbs();
 setupGenerator();
 setupScope();
 setupLab();
