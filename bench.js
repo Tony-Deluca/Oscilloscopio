@@ -2329,13 +2329,18 @@ function horizontalScale(d) {
     s.time = scaleStep(choices.filter((t) => t >= fastest), s.time, -d);
   } else s.time = scaleStep(choices, s.time, -d);
 }
+// Le manopole di posizione e di livello si muovono di un punto del display
+// (1/25 di divisione) e restano sulla griglia dei punti, così lo zero si
+// raggiunge esattamente (la posizione di 60 µs a 500 µs/div della foto sono
+// 3 punti da 20 µs).
+const onDotGrid = (value, step) => {
+  const v = Math.round(value / step) * step;
+  return Math.abs(v) < step * 1e-6 ? 0 : Number(v.toPrecision(12));
+};
 function channelOffset(channel, delta) {
   const limit = channel.scale <= 0.05 ? 0.5 : channel.scale <= 0.5 ? 5 : 50;
-  channel.pos = clamp(
-    channel.pos + (delta * channel.scale) / 10,
-    -limit,
-    limit,
-  );
+  const step = channel.scale / DISPLAY_POINTS_PER_DIV;
+  channel.pos = clamp(onDotGrid(channel.pos + delta * step, step), -limit, limit);
 }
 function runScope() {
   if (runningProgram?.waiting) {
@@ -2493,8 +2498,8 @@ function setupScope() {
         { id: "s-trigger", name: "Trigger", className: "slate" },
       ),
       turn("level", "Level", (d) => {
-        const scale = s.channels[s.trigSource === "CH2" ? 1 : 0].scale;
-        s.level = clamp(s.level + (d * scale) / 10, -50, 50);
+        const step = s.channels[s.trigSource === "CH2" ? 1 : 0].scale / DISPLAY_POINTS_PER_DIV;
+        s.level = clamp(onDotGrid(s.level + d * step, step), -50, 50);
       }),
     ),
   );
@@ -2546,11 +2551,8 @@ function setupScope() {
         "h-position",
         "Position",
         (d) => {
-          s.pos = clamp(
-            s.pos + (d * visibleTime()) / 10,
-            -s.time * 20,
-            s.time * 1000,
-          );
+          const step = visibleTime() / DISPLAY_POINTS_PER_DIV;
+          s.pos = clamp(onDotGrid(s.pos + d * step, step), -s.time * 20, s.time * 1000);
         },
         false,
         false,
