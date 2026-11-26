@@ -5,6 +5,30 @@ const Physics = (() => {
   const clamp = (x, min, max) => Math.min(max, Math.max(min, x));
   const frac = (x) => x - Math.floor(x);
   const mix = (a, b, f) => a + (b - a) * f;
+
+  // Costanti fisiche del banco.
+  // GDS-820C: ingresso 1 MΩ ±2 % con circa 22 pF (manuale, cap. 8).
+  // Cavo coassiale RG-58 C/U: circa 101 pF/m (valore nominale di catalogo).
+  // Sonda ×10 compensata: 10 MΩ con 10–15 pF alla punta (dispense del corso).
+  // Accoppiamento AC: banda da 10 Hz a −3 dB (manuale, cap. 8).
+  // Cavo RG-58: 50 Ω, fattore di velocità 0,66, cioè circa 5 ns/m.
+  const SCOPE_R = 1e6,
+    SCOPE_C = 22e-12,
+    CABLE_C_PER_M = 101e-12,
+    CABLE_DELAY_PER_M = 1 / (0.66 * 299792458),
+    PROBE_TIP_C = 13e-12,
+    AC_CORNER_HZ = 10;
+  // Fronti del generatore (User's Guide, cap. 8): quadra < 20 ns,
+  // triangolo, rampa e arbitrarie 40 ns tipici. La sinusoide è piatta.
+  const EDGE_DEFAULT = 20e-9,
+    EDGE_SLOW = 40e-9;
+  const cableDelay = (lab) => (lab.cable ?? 1) * CABLE_DELAY_PER_M;
+  function edgeTau(g, lab) {
+    if (g.wave === "SQUARE") return (lab.genEdge ?? EDGE_DEFAULT) / 2.2;
+    if (["TRIANGLE", "RAMP", "ARB"].includes(g.wave)) return EDGE_SLOW / 2.2;
+    return 0;
+  }
+
   const defaults = {
     "EXP RISE": (p) => Math.exp(5 * (p - 1)),
     "EXP FALL": (p) => Math.exp(-5 * p),
@@ -37,8 +61,13 @@ const Physics = (() => {
   const normalizations = new WeakMap();
   function arbValue(points, p) {
     if (!normalizations.has(points)) {
-      const lo = Math.min(...points),
-        hi = Math.max(...points);
+      // Ciclo, non Math.min(...points): array lunghi superano lo stack.
+      let lo = Infinity,
+        hi = -Infinity;
+      for (const v of points) {
+        lo = Math.min(lo, v);
+        hi = Math.max(hi, v);
+      }
       normalizations.set(points, [lo, hi]);
     }
     const [lo, hi] = normalizations.get(points);
@@ -85,6 +114,7 @@ const Physics = (() => {
     const { freq, amp, offset, wave, mode, settings } = g;
     const scale = g.term === "50 Ω" ? 2 : 1;
     const modTime = g.singleMode ? t - g.firedAt : t;
+    const fmFreq = g.fmFreq ?? g.modFreq;
     let phase = t * freq,
       amplitude = amp / 2;
     if (mode === "AM") {
@@ -92,13 +122,15 @@ const Physics = (() => {
         settings.amSource === "INT"
           ? shape(settings.amShape, t * g.modFreq)
           : external(t);
-      amplitude *= 1 + (g.depth / 100) * m;
+      // Profondità 0 %: metà dell'ampiezza impostata; 100 %: l'ampiezza
+      // impostata al picco della modulante (User's Guide, «Modulation Depth»).
+      amplitude *= (1 + (g.depth / 100) * m) / 2;
     }
     if (mode === "FM") {
-      // Integral of the modulating waveform. Tables preserve continuous phase.
-      const cycles = t * g.modFreq;
+      // Integrale della modulante: la fase resta continua.
+      const cycles = t * fmFreq;
       const integral = periodicPrimitive(settings.fmShape, cycles);
-      phase += (g.deviation * integral) / g.modFreq;
+      phase += (g.deviation * integral) / fmFreq;
     }
     if (mode === "FSK") {
       if (settings.fskSource === "INT") {
@@ -189,25 +221,38 @@ const Physics = (() => {
     phase: Math.atan2(z[1], z[0]),
   });
 
+  // Carico di un ingresso: cavo BNC diretto (×1) oppure sonda compensata.
+  function inputLoad(probe) {
+    return probe === 1
+      ? { conductance: 1 / SCOPE_R, cap: SCOPE_C, cable: true }
+      : { conductance: 1 / (probe * SCOPE_R), cap: PROBE_TIP_C, cable: false };
+  }
   function load(lab, node) {
+    const cable = CABLE_C_PER_M * (lab.cable ?? 1);
+    const direct = lab.circuit === "direct";
+    const here = (n) => n === node || (direct && node === "in" && n === "out");
+    // Nel collegamento diretto il cavo del generatore entra nel primo canale.
+    let shared = direct && node === "in";
     let conductance = 0,
       cap = 0;
     for (const c of lab.channels) {
-      if (
-        c.node !== node &&
-        !(lab.circuit === "direct" && node === "in" && c.node === "out")
-      )
-        continue;
-      conductance += 1 / (c.probe * 1e6);
-      cap += 22e-12 / c.probe;
+      if (!here(c.node)) continue;
+      const input = inputLoad(c.probe);
+      conductance += input.conductance;
+      cap += input.cap;
+      if (input.cable) {
+        if (shared) shared = false;
+        else cap += cable;
+      }
     }
-    if (
-      lab.ext === node ||
-      (lab.circuit === "direct" && node === "in" && lab.ext === "out")
-    ) {
-      conductance += 1e-6;
-      cap += 22e-12;
+    if (here(lab.ext)) {
+      conductance += 1 / SCOPE_R;
+      cap += SCOPE_C + cable;
     }
+    // Il cavo del generatore è una linea adattata (Rs = Z0 = 50 Ω): al suo
+    // capo il nodo vede di nuovo 50 Ω con la tensione ritardata, senza la
+    // capacità del cavo. I cavi verso l'oscilloscopio sono tronchi aperti:
+    // fino a circa 20 MHz per 1–2 m equivalgono alla loro capacità.
     return { conductance, cap };
   }
 
@@ -217,6 +262,11 @@ const Physics = (() => {
         [0, 0],
         [0, 0],
       ];
+    const delay = TAU * hz * cableDelay(lab);
+    const lag = [Math.cos(delay), -Math.sin(delay)];
+    return nodeTransfer(lab, hz).map((h) => cMul(h, lag));
+  }
+  function nodeTransfer(lab, hz) {
     const input = load(lab, "in"),
       output = load(lab, "out");
     const w = TAU * hz;
@@ -247,11 +297,12 @@ const Physics = (() => {
     };
   }
 
+  // Integratore esatto del circuito per un ingresso costante su ogni passo.
   function stepper(lab, dt) {
     const input = load(lab, "in"),
       output = load(lab, "out");
     if (lab.circuit === "open") return () => [0, 0];
-    const dc = transfer(lab, 0).map((z) => z[0]);
+    const dc = nodeTransfer(lab, 0).map((z) => z[0]);
     if (lab.circuit === "direct") {
       const q = input.cap
         ? Math.exp((-dt * (0.02 + input.conductance)) / input.cap)
@@ -291,25 +342,27 @@ const Physics = (() => {
     };
   }
 
-  function steady(g, lab) {
-    const scale = g.term === "50 Ω" ? 2 : 1;
-    if (!g.on || lab.circuit === "open") return () => [0, 0];
-    if (g.wave === "SINE") {
-      const dc = transfer(lab, 0).map((z) => scale * g.offset * z[0]);
-      const ac = transfer(lab, g.freq).map(polar);
-      return (t) =>
-        ac.map(
-          ({ gain, phase }, i) =>
-            dc[i] +
-            ((scale * g.amp) / 2) * gain * Math.sin(TAU * g.freq * t + phase),
-        );
-    }
-    const points = 2048,
-      dt = 1 / (g.freq * points);
+  // Costante di tempo più rapida del circuito, per scegliere il passo.
+  function fastestTau(lab) {
+    if (lab.circuit === "open") return Infinity;
+    const cap = load(lab, "in").cap;
+    return cap ? 50 * cap : Infinity;
+  }
+
+  // Regime periodico ai nodi IN e OUT su un periodo del generatore.
+  function steadyTable(g, lab, minTau = Infinity) {
+    const period = 1 / g.freq;
+    const tau = Math.min(minTau, fastestTau(lab));
+    const wanted = Number.isFinite(tau) ? period / (tau / 4) : 0;
+    const points = clamp(2 ** Math.ceil(Math.log2(Math.max(1, wanted))), 2048, 131072);
+    const dt = period / points;
     const advance = stepper(lab, dt);
-    const forcing = Float64Array.from({ length: points }, (_, i) =>
-      source(g, (i + 0.5) * dt, () => 0),
+    const delay = cableDelay(lab);
+    let forcing = Float64Array.from({ length: points }, (_, i) =>
+      source(g, (i + 0.5) * dt - delay, () => 0),
     );
+    const tg = edgeTau(g, lab);
+    if (tg && dt < 20 * tg) forcing = firstOrder(forcing, dt, tg, false, null);
     const run = (state) => {
       for (const value of forcing) state = advance(state, value);
       return state;
@@ -326,22 +379,17 @@ const Physics = (() => {
       Math.abs(det) > 1e-14
         ? [(d * v[0] - b * v[1]) / det, (a * v[1] - c * v[0]) / det]
         : [0, 0];
-    const table = Array.from(forcing, (value) => {
-      const prior = state;
-      state = advance(state, value);
-      return prior;
-    });
-    return (t) => {
-      const index = frac(t * g.freq) * points;
-      const i = Math.min(points - 1, Math.floor(index));
-      const next = table[(i + 1) % points];
-      return table[i].map((value, j) => mix(value, next[j], frac(index)));
-    };
+    const values = [new Float64Array(points), new Float64Array(points)];
+    for (let i = 0; i < points; i++) {
+      values[0][i] = state[0];
+      values[1][i] = state[1];
+      state = advance(state, forcing[i]);
+    }
+    return { period, dt, values };
   }
 
-  function signal(g, lab, t0, t1, external) {
-    if (g.mode === "CONT" && g.wave !== "NOISE") return steady(g, lab);
-    if (!g.on) return () => [0, 0];
+  // Evoluzione non periodica (modulazioni, rumore) su un intervallo.
+  function transientTable(g, lab, t0, t1, external, minTau = Infinity) {
     const highest =
       g.wave === "NOISE"
         ? 20e6
@@ -354,22 +402,180 @@ const Physics = (() => {
           );
     const warm = Math.min(lab.r * lab.c * 5, t1 - t0);
     const start = t0 - warm;
-    const n = clamp(Math.ceil((t1 - start) * highest * 36), 1024, 24000);
+    const tau = Math.min(minTau, fastestTau(lab));
+    const byEdges = Number.isFinite(tau) ? (t1 - start) / (tau / 2) : 0;
+    const n = clamp(
+      Math.ceil(Math.max((t1 - start) * highest * 36, byEdges)),
+      1024,
+      40000,
+    );
     const dt = (t1 - start) / n;
     const advance = stepper(lab, dt);
-    const sourceAt = (t) => source(g, t, external);
-    const dc = transfer(lab, 0).map((z) => z[0]);
-    let state = dc.map((h) => h * g.offset * (g.term === "50 Ω" ? 2 : 1));
-    const table = Array.from({ length: n + 1 }, (_, i) => {
-      if (i) state = advance(state, sourceAt(start + (i - 0.5) * dt));
-      return state;
-    });
+    const dc = nodeTransfer(lab, 0).map((z) => z[0]);
+    const delay = cableDelay(lab);
+    // Stato iniziale: punto di lavoro in continua per il valor medio della
+    // sorgente, così anche le costanti di tempo lunghe partono a regime.
+    let mean = 0;
+    for (let i = 0; i < 4096; i++)
+      mean += source(g, start + ((i + 0.5) * (t1 - start)) / 4096, external) / 4096;
+    let state = dc.map((h) => h * mean);
+    const values = [new Float64Array(n + 1), new Float64Array(n + 1)];
+    const tg = edgeTau(g, lab),
+      edge = tg && dt < 20 * tg ? Math.exp(-dt / tg) : 0;
+    let u = mean;
+    for (let i = 0; i <= n; i++) {
+      if (i) {
+        const raw = source(g, start + (i - 0.5) * dt - delay, external);
+        u = edge ? edge * u + (1 - edge) * raw : raw;
+        state = advance(state, u);
+      }
+      values[0][i] = state[0];
+      values[1][i] = state[1];
+    }
+    return { start, dt, values };
+  }
+
+  const periodicLookup = (values, period) => {
+    const n = values.length;
     return (t) => {
-      const p = clamp((t - start) / dt, 0, n - 1e-9);
-      return table[Math.floor(p)].map((v, j) =>
-        mix(v, table[Math.floor(p) + 1][j], frac(p)),
-      );
+      const p = frac(t / period) * n,
+        i = Math.floor(p) % n;
+      return mix(values[i], values[(i + 1) % n], p - Math.floor(p));
     };
+  };
+  const linearLookup = (values, start, dt) => (t) => {
+    const p = clamp((t - start) / dt, 0, values.length - 1 - 1e-9);
+    const i = Math.floor(p);
+    return mix(values[i], values[i + 1], p - i);
+  };
+
+  function steady(g, lab) {
+    const scale = g.term === "50 Ω" ? 2 : 1;
+    if (!g.on || lab.circuit === "open") return () => [0, 0];
+    if (g.wave === "SINE") {
+      const dc = transfer(lab, 0).map((z) => scale * g.offset * z[0]);
+      const ac = transfer(lab, g.freq).map(polar);
+      return (t) =>
+        ac.map(
+          ({ gain, phase }, i) =>
+            dc[i] +
+            ((scale * g.amp) / 2) * gain * Math.sin(TAU * g.freq * t + phase),
+        );
+    }
+    const table = steadyTable(g, lab);
+    const a = periodicLookup(table.values[0], table.period),
+      b = periodicLookup(table.values[1], table.period);
+    return (t) => [a(t), b(t)];
+  }
+
+  function signal(g, lab, t0, t1, external) {
+    if (g.mode === "CONT" && g.wave !== "NOISE") return steady(g, lab);
+    if (!g.on) return () => [0, 0];
+    const table = transientTable(g, lab, t0, t1, external);
+    const a = linearLookup(table.values[0], table.start, table.dt),
+      b = linearLookup(table.values[1], table.start, table.dt);
+    return (t) => [a(t), b(t)];
+  }
+
+  // Stadio d'ingresso dell'oscilloscopio: accoppiamento AC (passa-alto a
+  // 10 Hz) e banda analogica (passa-basso del primo ordine a 150 MHz o al
+  // limite di 20 MHz). Il primo ordine dà un tempo di salita 0,35/B: 2,3 ns.
+  function frontEndGain(spec, hz) {
+    let h = [1, 0];
+    if (spec.ac) {
+      const x = hz / AC_CORNER_HZ;
+      h = cDiv([0, x], [1, x]);
+    }
+    return cDiv(h, [1, hz / spec.bw]);
+  }
+  function firstOrder(u, dt, tau, highpass, init) {
+    const n = u.length,
+      out = new Float64Array(n);
+    const a = Math.exp(-dt / tau);
+    let x = init;
+    if (init === null) {
+      // Regime periodico: x(0) = x(T).
+      let r = 0;
+      for (let i = 0; i < n; i++) r = a * r + (1 - a) * u[i];
+      x = r / -Math.expm1((-n * dt) / tau);
+    }
+    for (let i = 0; i < n; i++) {
+      x = a * x + (1 - a) * u[i];
+      out[i] = highpass ? u[i] - x : x;
+    }
+    return out;
+  }
+  function frontEndTable(u, dt, spec, periodic, bias = 0) {
+    let y = u;
+    if (spec.ac)
+      y = firstOrder(y, dt, 1 / (TAU * AC_CORNER_HZ), true, periodic ? null : bias);
+    const tl = 1 / (TAU * spec.bw);
+    if (dt < 20 * tl) y = firstOrder(y, dt, tl, false, periodic ? null : y[0]);
+    return y;
+  }
+
+  const videoStandards = {
+    ntsc: { lines: 525, fields: 60000 / 1001 },
+    pal: { lines: 625, fields: 50 },
+    secam: { lines: 625, fields: 50 },
+  };
+  function videoAt(kind, t) {
+    const { lines, fields } = videoStandards[kind];
+    const lineTime = 2 / (lines * fields);
+    const phase = frac(t / lineTime);
+    if (phase < 0.074) return -0.3;
+    if (phase < 0.18 || phase > 0.97) return 0;
+    return 0.1 + 0.55 * Math.sin((Math.PI * (phase - 0.18)) / 0.79) ** 2;
+  }
+  // Uscita di compensazione sonde: onda quadra 0–2 V a 1 kHz.
+  const calibrationAt = (t) => (frac(1000 * t) < 0.5 ? 2 : 0);
+
+  function periodicNode(fn, period, spec, points = 4096) {
+    const dt = period / points;
+    const u = Float64Array.from({ length: points }, (_, i) => fn(i * dt));
+    return periodicLookup(frontEndTable(u, dt, spec, true), period);
+  }
+
+  // Tensione all'ingresso BNC di ogni canale dopo lo stadio analogico.
+  // specs[i] = { node, ac, bw }. Restituisce t → [v0, v1, ...].
+  function analog(g, lab, specs, t0, t1, external) {
+    const scale = g.term === "50 Ω" ? 2 : 1;
+    const minTau = Math.min(...specs.map((spec) => 1 / (TAU * spec.bw)));
+    const on = g.on && lab.circuit !== "open";
+    const periodic = g.mode === "CONT" && g.wave !== "NOISE";
+    const dc = transfer(lab, 0).map((z) => scale * g.offset * z[0]);
+    let table = null,
+      transient = null;
+    const fns = specs.map((spec) => {
+      const node = spec.node;
+      if (node === "cal")
+        return periodicNode(calibrationAt, 1e-3, spec);
+      if (node in videoStandards) {
+        const { lines, fields } = videoStandards[node];
+        return periodicNode((t) => videoAt(node, t), 2 / (lines * fields), spec, 2048);
+      }
+      if (node !== "in" && node !== "out") return () => 0;
+      if (!on) return () => 0;
+      const k = node === "in" ? 0 : 1;
+      if (periodic && g.wave === "SINE") {
+        const h = cMul(transfer(lab, g.freq)[k], frontEndGain(spec, g.freq));
+        const { gain, phase } = polar(h);
+        const a = ((scale * g.amp) / 2) * gain,
+          w = TAU * g.freq,
+          d = spec.ac ? 0 : dc[k];
+        return (t) => d + a * Math.sin(w * t + phase);
+      }
+      if (periodic) {
+        table ??= steadyTable(g, lab, minTau);
+        const y = frontEndTable(table.values[k], table.dt, spec, true);
+        return periodicLookup(y, table.period);
+      }
+      transient ??= transientTable(g, lab, t0, t1, external, minTau);
+      const u = transient.values[k];
+      const y = frontEndTable(u, transient.dt, spec, false, u.reduce((a, b) => a + b, 0) / u.length);
+      return linearLookup(y, transient.start, transient.dt);
+    });
+    return (t) => fns.map((fn) => fn(t));
   }
 
   function crossings(values, level, rising, dt, start = 0) {
@@ -379,6 +585,22 @@ const Physics = (() => {
         b = values[i];
       if (rising ? a < level && b >= level : a > level && b <= level)
         result.push(start + (i - 1 + (level - a) / (b - a)) * dt);
+    }
+    return result;
+  }
+  // Passaggi per un livello con isteresi: un nuovo passaggio conta solo dopo
+  // che il segnale è tornato oltre la banda dal lato opposto.
+  function crossingsWithHysteresis(values, level, rising, dt, band) {
+    const result = [];
+    let armed = false;
+    for (let i = 1; i < values.length; i++) {
+      const a = values[i - 1],
+        b = values[i];
+      if (rising ? b < level - band : b > level + band) armed = true;
+      if (armed && (rising ? a < level && b >= level : a > level && b <= level)) {
+        result.push((i - 1 + (level - a) / (b - a)) * dt);
+        armed = false;
+      }
     }
     return result;
   }
@@ -396,19 +618,32 @@ const Physics = (() => {
     }
     const vpp = hi - lo,
       middle = (hi + lo) / 2;
-    const bins = new Uint32Array(64);
+    // Vhi e Vlo: livello più frequente di ciascuna metà (media dei campioni
+    // della classe). Se l'istogramma non ha un picco netto, come in una rampa,
+    // si usano il massimo e il minimo.
+    const bins = new Uint32Array(64),
+      sums = new Float64Array(64);
     if (vpp)
-      for (const v of values)
-        bins[Math.min(63, Math.floor(((v - lo) / vpp) * 64))]++;
-    const peak = (from, to) => {
-      let index = from;
-      for (let i = from + 1; i < to; i++) if (bins[i] > bins[index]) index = i;
-      return lo + ((index + 0.5) / 64) * vpp;
+      for (const v of values) {
+        const k = Math.min(63, Math.floor(((v - lo) / vpp) * 64));
+        bins[k]++;
+        sums[k] += v;
+      }
+    const level = (from, to, fallback) => {
+      let index = from,
+        total = 0;
+      for (let i = from; i < to; i++) {
+        total += bins[i];
+        if (bins[i] > bins[index]) index = i;
+      }
+      const distinct = bins[index] >= Math.max(3, (2.5 * total) / (to - from));
+      return distinct ? sums[index] / bins[index] : fallback;
     };
-    const vhi = vpp ? peak(32, 64) : hi,
-      vlo = vpp ? peak(0, 32) : lo;
-    const up = crossings(values, middle, true, dt),
-      down = crossings(values, middle, false, dt);
+    const vhi = vpp ? level(32, 64, hi) : hi,
+      vlo = vpp ? level(0, 32, lo) : lo;
+    const hysteresis = 0.1 * vpp;
+    const up = crossingsWithHysteresis(values, middle, true, dt, hysteresis),
+      down = crossingsWithHysteresis(values, middle, false, dt, hysteresis);
     const period = measuredPeriod ?? up[1] - up[0];
     const positiveEnd = down.find((t) => t > up[0]);
     const negativeEnd = up.find((t) => t > down[0]);
@@ -452,12 +687,14 @@ const Physics = (() => {
     };
   }
 
+  // Spettro di ampiezza (valore efficace per bin) su N campioni qualsiasi,
+  // con il guadagno coerente della finestra compensato.
   function spectrum(data, window) {
-    const n = 2 ** Math.floor(Math.log2(Math.min(data.length, 2048)));
-    const a = new Float64Array(n),
-      b = new Float64Array(n);
+    const n = data.length;
+    if (n < 2) return new Float64Array(1);
+    const x = new Float64Array(n);
     let sum = 0;
-    for (let i = 0, j = 0; i < n; i++) {
+    for (let i = 0; i < n; i++) {
       const p = (TAU * i) / (n - 1);
       const weight =
         {
@@ -470,38 +707,28 @@ const Physics = (() => {
             0.083578947 * Math.cos(3 * p) +
             0.006947368 * Math.cos(4 * p),
         }[window] ?? 1;
-      a[j] = data[i] * weight;
+      x[i] = (Number.isFinite(data[i]) ? data[i] : 0) * weight;
       sum += weight;
-      let bit = n >> 1;
-      while (bit && j & bit) {
-        j ^= bit;
-        bit >>= 1;
+    }
+    const cos = Float64Array.from({ length: n }, (_, i) => Math.cos((TAU * i) / n));
+    const sin = Float64Array.from({ length: n }, (_, i) => Math.sin((TAU * i) / n));
+    const half = Math.floor(n / 2);
+    const out = new Float64Array(half + 1);
+    for (let k = 0; k <= half; k++) {
+      let re = 0,
+        im = 0,
+        index = 0;
+      for (let i = 0; i < n; i++) {
+        re += x[i] * cos[index];
+        im -= x[i] * sin[index];
+        index += k;
+        if (index >= n) index -= n;
       }
-      j ^= bit;
+      out[k] =
+        (Math.hypot(re, im) / sum) *
+        (k === 0 || (n % 2 === 0 && k === half) ? 1 : Math.SQRT2);
     }
-    for (let len = 2; len <= n; len *= 2) {
-      const half = len / 2;
-      for (let i = 0; i < n; i += len)
-        for (let j = 0; j < half; j++) {
-          const angle = (-TAU * j) / len,
-            c = Math.cos(angle),
-            s = Math.sin(angle),
-            k = i + j,
-            l = k + half;
-          const re = a[l] * c - b[l] * s,
-            im = a[l] * s + b[l] * c;
-          a[l] = a[k] - re;
-          b[l] = b[k] - im;
-          a[k] += re;
-          b[k] += im;
-        }
-    }
-    return Float64Array.from(
-      { length: n / 2 + 1 },
-      (_, i) =>
-        (Math.hypot(a[i], b[i]) / sum) *
-        (i === 0 || i === n / 2 ? 1 : Math.SQRT2),
-    );
+    return out;
   }
 
   return {
@@ -509,13 +736,21 @@ const Physics = (() => {
     mix,
     shape,
     factoryArbs,
+    load,
     transfer,
+    nodeTransfer,
     response,
     signal,
+    analog,
+    frontEndGain,
     source,
     crossings,
     measures,
     spectrum,
+    videoStandards,
+    videoAt,
+    calibrationAt,
+    constants: { SCOPE_R, SCOPE_C, CABLE_C_PER_M, CABLE_DELAY_PER_M, PROBE_TIP_C, AC_CORNER_HZ, EDGE_DEFAULT },
   };
 })();
 

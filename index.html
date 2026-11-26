@@ -4,20 +4,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Banco RC · Laboratorio di misure</title>
+    <meta name="theme-color" content="#3a2a1f" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
     <link rel="stylesheet" href="style.css" />
     <script defer src="physics.js"></script>
     <script defer src="bench.js"></script>
+    <script defer src="pwa.js"></script>
   </head>
   <body>
     <main class="bench">
-      <header class="masthead">
-        <div>
-          <p class="kicker">Laboratorio di misure</p>
-          <h1>Banco <em>RC</em></h1>
-        </div>
-        <div class="mast-actions">
-          <button type="button" id="reset-lab">Ricarica assetto foto</button
-          ><a href="#guide">Guida al banco ↓</a>
+      <header class="toolbar">
+        <span class="product">Banco RC</span>
+        <div class="toolbar-actions">
+          <button type="button" id="lab-preset">Assetto esperienze</button
+          ><button type="button" id="reset-lab">Assetto foto</button>
         </div>
       </header>
       <div class="workbench">
@@ -80,11 +82,7 @@
                   <div id="scope-soft" class="scope-soft"></div>
                 </div>
                 <div class="under-screen">
-                  <button id="csv" type="button">Scarica campioni CSV</button
-                  ><span
-                    >Trascina le manopole o usa la rotella · frecce da
-                    tastiera</span
-                  >
+                  <button id="csv" type="button">Scarica campioni CSV</button>
                 </div>
               </div>
               <div class="scope-controls" id="scope-controls"></div>
@@ -140,83 +138,15 @@
                 ></label
               >
             </div>
-            <p class="hint" id="lab-hint">
-              Valori di simulazione. La foto non basta per leggere R e C con
-              certezza.
-            </p>
             <div class="patch" id="patch"></div>
           </section>
           <section class="lab-card">
             <header><h2>Risposta del filtro</h2></header>
             <dl class="results" id="response"></dl>
-            <p class="hint" id="response-hint">
-              Risposta sinusoidale OUT/IN alla frequenza impostata.
-            </p>
           </section>
         </aside>
       </div>
       <p id="notice" class="notice" role="status" hidden></p>
-      <details class="guide" id="guide">
-        <summary>Guida e limiti della simulazione</summary>
-        <div>
-          <p>
-            <b>Inizia dall’assetto foto.</b> Il generatore imposta 1 Vpp. Sul
-            display dell’oscilloscopio si leggono 870 Hz, 200 mV/div sui due
-            canali, 500 µs/div, 50 kSa/s, CH1 in DC, CH2 in AC e acquisizione
-            Average. Il cablaggio CH1 su IN e CH2 su OUT è ricostruito dal
-            montaggio e dalle tracce. High Z, 2,2 kΩ e 82 nF sono scelte del
-            preset. La coppia R–C riproduce approssimativamente l’attenuazione e
-            lo sfasamento visibili.
-          </p>
-          <p>
-            <b>HP 33120A.</b> Freq, Ampl e Offset scelgono cosa regolare. Usa la
-            manopola o Enter Number, poi le cifre verdi e una freccia per
-            confermare l’unità. Shift attiva la funzione secondaria. Shift +
-            Enter apre il menu. ↑ e ↓ cambiano livello, ← e → scorrono, Enter
-            conferma. Shift + ← ritorna all’ultimo comando.
-          </p>
-          <p>
-            <b>GDS-820C.</b> Le funzioni di misura appaiono accanto a F1–F5.
-            VARIABLE regola la voce evidenziata. Run/Stop congela il record e
-            consente di esplorarlo. Collega il fondo scala sonda del canale
-            (Probe) all’attenuazione fisica selezionata nella sezione cablaggio.
-          </p>
-          <p>
-            <b>Modello.</b> L’uscita del generatore ha 50 Ω fisici. Per il
-            passa-basso, il carico nominale dei canali è 1 MΩ ∥ 22 pF in
-            collegamento diretto. La scheda del filtro mostra il trasferimento
-            ai nodi fisici prima dei controlli del display. Le misure a schermo
-            derivano dai campioni e dipendono da finestra, trigger e scala.
-          </p>
-          <p>
-            <b>Copertura.</b> La simulazione riproduce il flusso dei controlli
-            di banco. Campionamento equivalente, filtri analogici,
-            temporizzazione delle modulazioni, algoritmi firmware e sonde
-            ×10/×100 sono approssimati. Porte, stampante e calibrazione vengono
-            rappresentate come funzioni virtuali. La traduzione del display è
-            parziale. I template Go-No Go usano i riferimenti locali, con
-            confronto verticale. L’importazione FreeCapture e le porte fisiche
-            restano fuori dalla simulazione. Il firmware installato nei due
-            esemplari non è leggibile nelle foto.
-          </p>
-          <p>
-            <a
-              href="https://www.keysight.com/gn/en/assets/9018-06352/reference-guides/9018-06352.pdf"
-              >Keysight 33120A · Quick Reference Guide, p. 1</a
-            >
-            ·
-            <a
-              href="https://www.keysight.com/content/dam/keysight/en/doc/gate/user-manuals/9018-04436.pdf"
-              >Keysight 33120A · User’s Guide, pp. 3, 19–22, 30–33 e 53–114</a
-            >
-            ·
-            <a
-              href="https://www.gwinstek.com/en-US/products/downloadSeriesDownNew/12199/1057"
-              >GW Instek GDS-800 · Operation Manual, pp. 12–67 e 73–77</a
-            >
-          </p>
-        </div>
-      </details>
     </main>
   </body>
 </html>
