@@ -16,6 +16,15 @@ replace(
 );
 replace('    <script defer src="physics.js"></script>\n', "");
 replace('    <script defer src="bench.js"></script>\n', "");
+// La versione autonoma è un file solo: niente manifest, icone esterne né
+// service worker, che richiedono i file accanto e un server http(s).
+for (const line of [
+  '    <link rel="manifest" href="manifest.webmanifest" />\n',
+  '    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />\n',
+  '    <link rel="apple-touch-icon" href="icons/icon-192.png" />\n',
+  '    <script defer src="pwa.js"></script>\n',
+])
+  replace(line, "");
 replace(
   "  </body>",
   "    <script>\n" + read("physics.js") + "    </script>\n" +

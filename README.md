@@ -8,7 +8,18 @@ Apri [banco-rc.html](banco-rc.html) in un browser per usare la versione autonoma
 - [Schermata desktop](docs/evidenze/desktop.png) e [schermata mobile](docs/evidenze/mobile.png)
 - [Riquadro del display fotografato](docs/evidenze/photo-lcd.png) e [riquadro del circuito fotografato](docs/evidenze/photo-rc.png)
 - [Campioni CSV](docs/esportazioni/GDS-820C-campioni.csv) e [schermata PNG esportata](docs/esportazioni/GDS-820C-display.png)
+- [Verifica indipendente della fisica con SciPy](docs/verifica-fisica.md)
 - [Test analitico](tests/physics.cjs), [test in Chrome](tests/browser.mjs) e [test HTML autonomo](tests/standalone-browser.mjs)
+
+## Installarlo come app
+
+Banco RC è una PWA: servito via http(s) si installa dal browser (icona «Installa» nella barra degli indirizzi su Chrome ed Edge, «Aggiungi a Home» su telefono), si apre a schermo intero e funziona anche offline. Per provarlo sul proprio computer:
+
+```bash
+python3 -m http.server 8000
+```
+
+Poi apri http://localhost:8000/index.html. Per averlo online, pubblica la cartella con GitHub Pages. La versione autonoma `banco-rc.html` resta un file unico da aprire direttamente, senza installazione.
 
 ## Verifica locale
 
