@@ -966,7 +966,7 @@ dialog select {
 }
 @media (max-width: 620px) {
   .bench {
-    padding: 10px 8px 24px;
+    padding: 10px 16px 24px;
   }
   .toolbar {
     padding: 6px 8px;
