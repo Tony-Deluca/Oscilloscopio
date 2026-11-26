@@ -68,7 +68,7 @@ Il comportamento degli strumenti è ricavato dai manuali ufficiali e verificato 
 - **Acquisizione dell'oscilloscopio** (`bench.js`):
   - frequenza di campionamento secondo la tabella 5-2 del manuale, fino a 100 MSa/s, e tempo equivalente sotto 250 ns/div;
   - ADC a 8 bit con 25 livelli per divisione, che satura oltre ±5,12 divisioni;
-  - memoria circolare con pre-trigger e post-trigger, quindi a 100 ms/div servono 2 s per riempirla;
+  - memoria circolare con pre-trigger e post-trigger, quindi a 100 ms/div servono 2 s per riempirla; si svuota solo cambiando base dei tempi, memoria o modo di acquisizione, o dopo uno Stop, quindi dopo un cambio di livello di trigger o di scala verticale basta attendere il post-trigger;
   - 500 punti elaborati per misure e FFT, 25 punti per divisione a schermo;
   - modi Sample, Peak Detect e Average (media mobile, più lenta ad assestarsi con più medie) e Roll.
 - **Fisica del banco** (`physics.js`):
@@ -76,7 +76,7 @@ Il comportamento degli strumenti è ricavato dai manuali ufficiali e verificato 
   - cavo del generatore come linea adattata a 50 Ω, che introduce solo un ritardo; cavi verso l'oscilloscopio come capacità;
   - fronti finiti dell'onda quadra, calcolati con passi fitti vicino ai fronti, così restano nitidi anche a frequenze molto basse;
   - stadio d'ingresso con accoppiamento AC a 10 Hz e banda di 150 MHz, o 20 MHz con BW Limit.
-- **Verifiche.** Il modello fisico è stato ricalcolato da zero con NumPy e SciPy, con 39 confronti su 39 in accordo ([docs/verifica-fisica.md](docs/verifica-fisica.md)). Altri 39 controlli confrontano il simulatore con i valori dei manuali.
+- **Verifiche.** Il modello fisico è stato ricalcolato da zero con NumPy e SciPy, con 39 confronti su 39 in accordo ([docs/verifica-fisica.md](docs/verifica-fisica.md)). Altri 40 controlli confrontano il simulatore con i valori dei manuali.
 
 ## Limiti
 
@@ -123,7 +123,7 @@ Gli altri test richiedono Node.js 22.4 o successivo e un Chrome di prova avviato
 | --- | --- |
 | `node tests/browser.mjs` | Il pannello completo: menu, trigger, cursori, FFT, memoria, esportazioni, versione mobile |
 | `node tests/standalone-browser.mjs` | Lo stesso su `banco-rc.html`, senza file esterni |
-| `node tests/conformita.mjs` | 39 controlli contro i manuali: tabella 5-2 completa, ADC, misure, FFT, cursori, trigger, sonde, limiti del generatore, robustezza |
+| `node tests/conformita.mjs` | 40 controlli contro i manuali: tabella 5-2 completa, ADC, misure, FFT, cursori, trigger, sonde, limiti del generatore, robustezza |
 | `node tests/fuzz.mjs [seme] [azioni]` | Azioni casuali riproducibili su tasti, manopole e campi, controllando che non compaiano eccezioni o valori non validi |
 
 La verifica indipendente della fisica richiede Python con NumPy e SciPy:

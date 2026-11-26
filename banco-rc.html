@@ -4769,6 +4769,12 @@ let triggerStatus = "AUTO",
 // Stato del motore di acquisizione.
 let pending = null,
   nextArm = 0,
+  // La memoria circolare si riempie di continuo mentre lo strumento è in
+  // Run: dopo un cambio di livello di trigger, posizione o scala verticale i
+  // campioni di pre-trigger ci sono già. Si svuota solo se cambiano la base
+  // dei tempi, la memoria o il modo di acquisizione, o dopo uno Stop.
+  bufferKey = null,
+  bufferStart = 0,
   averageState = null,
   etState = null,
   rollState = null,
@@ -5110,8 +5116,14 @@ const averageRate = (duration) => 1 / (duration + 0.005);
 
 // Arma una nuova acquisizione: la memoria circolare deve prima riempire la
 // parte di pre-trigger, poi si attende l'evento e la parte di post-trigger.
+const samplingKey = () => [s.time, s.recordLength, s.acq, s.horizontal].join("|");
 function armAcquisition(t) {
   const plan = acquisitionPlan();
+  const key = samplingKey();
+  if (key !== bufferKey) {
+    bufferKey = key;
+    bufferStart = t;
+  }
   const duration = plan.et ? 20 * s.time : plan.length / plan.fs;
   const recordStart = s.pos - duration / 2;
   const pre = Math.max(0, -recordStart),
@@ -5122,8 +5134,8 @@ function armAcquisition(t) {
     recordStart,
     pre,
     post,
-    armedAt: t,
-    from: t + pre,
+    ready: Math.max(t, bufferStart + pre),
+    from: Math.max(t, bufferStart + pre),
     revision: changeRevision,
     trigger: null,
     hz: NaN,
@@ -5154,7 +5166,7 @@ function serviceAcquisition(t) {
       p.from = to;
       const auto = s.trigMode === "Auto" || s.trigMode === "Auto Level";
       const timeout = Math.max(0.15, p.duration);
-      if (auto && t - p.armedAt - p.pre > timeout) {
+      if (auto && t - p.ready > timeout) {
         p.trigger = t - p.post;
         p.triggered = false;
       } else {
@@ -6331,6 +6343,7 @@ function tick(timestamp) {
   requestAnimationFrame(tick);
 }
 function tickFrame(timestamp) {
+  if (!s.on || !s.running) bufferKey = null;
   if (positionReadout && performance.now() > positionReadout.until) {
     positionReadout = null;
     renderScope();

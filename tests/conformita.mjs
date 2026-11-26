@@ -154,6 +154,9 @@ check('Tempo di calcolo di un’acquisizione (ms)', m[125000]<400, m);
 await reset();
 m=await js("(()=>{lab.circuit='rc'; lab.channels[1].node='out'; g.wave='SQUARE'; g.freq=1; g.amp=1; g.offset=0; g.mode='CONT'; g.term='HIGH Z'; s.trigMode='Normal'; s.trigType='Edge'; s.trigSource='CH1'; s.slope='Rising'; s.level=0.1; s.trigCoupling='DC'; s.reject='Off'; s.channels[0].scale=0.2; s.channels[0].coupling='DC'; changed(); const f=findTrigger(analogWindow(0,1),4.99,6.03,signalPeriod()); return {ritardo_ns:(f.time-5)*1e9, hz:f.hz};})()");
 check('Quadra a 1 Hz: trigger sul fronte entro 30 ns dal ritardo del cavo (5 ns)', m.ritardo_ns>0 && m.ritardo_ns<35 && Math.abs(m.hz-1)<1e-6, m);
+// Memoria circolare: un cambio verticale non la svuota, un cambio di Time/div sì.
+m=await js("(()=>{s.time=0.05; s.pos=0; changed(); const t=now(); armAcquisition(t); s.channels[0].pos+=0.04; changed(); armAcquisition(t+2); const verticale=pending.from-(t+2); s.time=0.1; changed(); armAcquisition(t+3); const tempi=pending.from-(t+3); pending=null; return {verticale, tempi};})()");
+check('Dopo Position nessuna nuova attesa di pre-trigger; dopo Time/div 100 ms si riempie 1 s', m.verticale===0 && Math.abs(m.tempi-1)<1e-9, m);
 console.log(R.join('\n'));
 ws.close();
 if (errors.length) console.log('Errori JavaScript:', JSON.stringify(errors));
